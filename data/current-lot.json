@@ -1,0 +1,23 @@
+{
+  "id": 3161,
+  "state": "ACTIVE",
+  "created_at": "2026-09-18T18:50:19.086Z",
+  "ends_at": "2026-09-18T18:55:19.086Z",
+  "commitment": "0d6d20a1ed4b0c6f376fbc96d3e49732b04f47a1e295fe886a77302c109216e1",
+  "secret_seed": 2772779885,
+  "artifact_id": "VA-62649D0E",
+  "participants": {
+    "4154ee65-243a-4c68-8a4c-f698eba6e92b": {
+      "joined_at": "2026-09-18T18:52:23.570Z",
+      "last_seen": "2026-09-18T18:53:42.941Z",
+      "seconds": 79.371,
+      "continuous": true,
+      "country": "Europe/Kyiv"
+    }
+  },
+  "countries": {
+    "Europe/Kyiv": 1
+  },
+  "winner_session": null,
+  "revealed": null
+}

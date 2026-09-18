@@ -1,0 +1,17 @@
+{
+  "name": "the-void-v1",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:generation": "node tests/generation/smoke.mjs",
+    "test:signature": "node tests/verification/signature.mjs",
+    "test:fairness": "node tests/fairness/simulate.mjs",
+    "demo": "node server/demo.mjs",
+    "start": "node server/http/app.mjs",
+    "test:quality": "node tests/quality.mjs",
+    "test": "node tests/all.mjs",
+    "local": "node server/start-local.mjs",
+    "production": "NODE_ENV=production node server/http/app.mjs"
+  }
+}
