@@ -40,6 +40,6 @@ export function buildStory({object,family,anomaly,weirdness,baseClassification})
  const compatible=s.compatible.includes(family);
  const classification=compatible?(s.classBias[family]||baseClassification):baseClassification;
  const rarityScore=weirdness+(compatible?5:0)+(s.domain==="TIME"?4:0);
- const rarity=rarityScore>=100?"MYTHIC":rarityScore>=88?"LEGENDARY":rarityScore>=65?"RARE":"COMMON";
+ const rarity=rarityScore>=106?"DIVINE":rarityScore>=100?"MYTHIC":rarityScore>=94?"LEGENDARY":rarityScore>=86?"EPIC":rarityScore>=77?"RARE":rarityScore>=70?"UNCOMMON":"COMMON";
  return {domain:s.domain,compatible,classification,rarity,condition:s.condition,stats:s.stat(weirdness),lore:s.lore(object.replaceAll("_"," ").toLowerCase())};
 }

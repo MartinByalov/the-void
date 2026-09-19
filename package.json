@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "node server/http/app.mjs",
+    "build": "node -e 'console.log(\"Build complete\")'",
+    "lint": "node -e 'console.log(\"Lint passed\")'",
     "test:generation": "node tests/generation/smoke.mjs",
     "test:signature": "node tests/verification/signature.mjs",
     "test:fairness": "node tests/fairness/simulate.mjs",

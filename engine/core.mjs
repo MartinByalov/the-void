@@ -1,6 +1,6 @@
 import {OBJECTS} from "./registry/objects.mjs";
 import {ANOMALIES} from "./anomalies/catalog.mjs";
-import {PALETTES} from "./palettes/catalog.mjs";
+import {PALETTES,PALETTE_NAMES} from "./palettes/catalog.mjs";
 import {GRAMMARS} from "./grammars/families.mjs";
 import {render24} from "./renderer/pixels.mjs";
 import {identity} from "./identity/index.mjs";
@@ -16,7 +16,8 @@ export function generate(seed){
  const weirdness=Math.min(99,anomaly.min+Math.floor(r()*(100-anomaly.min))), baseClassification=pick(r,def.publicClasses);
  const story=buildStory({object,family:def.family,anomaly,weirdness,baseClassification});
  const classification=story.classification,rarity=story.rarity;
- const palette=pick(r,PALETTES[classification]||PALETTES.RELIC), semantic_traits=[...def.traits];
+ const classPalettes=PALETTES[classification]||PALETTES.RELIC;
+ const palette=pick(r,r()<.72?classPalettes:PALETTE_NAMES), semantic_traits=[...def.traits];
  const familyPrimitives=GRAMMARS[def.family](r,def.variant);
  const morphologyPrimitives=morphology(object,{variant:def.variant,primitives:familyPrimitives});
  const composed=composeTraits(def.family,r,anomaly.id);

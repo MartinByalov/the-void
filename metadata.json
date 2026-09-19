@@ -1,0 +1,6 @@
+{
+  "name": "The Void",
+  "description": "A mysterious procedural artifact lot machine and archive.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
