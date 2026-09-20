@@ -1,0 +1,10 @@
+import crypto from "node:crypto";
+import {createKeys,verifyRecord,publicKeyPEM} from "./crypto/signing.mjs";
+import {createArtifact} from "./artifacts/create.mjs";
+import {canonicalJSON} from "../shared/artifact-protocol/canonical.mjs";
+const {privateKey,publicKey}=createKeys(),seed=crypto.randomBytes(4).readUInt32BE();
+const artifact=createArtifact(seed,{lot:9182,participants:137,countries:29,combined_presence_minutes:6814},privateKey);
+console.log("\nTHE VOID v1 // SIGNED ARTIFACT\n",artifact.record);
+console.log("\nSIGNATURE:",artifact.signature);
+console.log("VERIFIED:",verifyRecord(canonicalJSON(artifact.record),artifact.signature,publicKey));
+console.log("\nPUBLIC KEY\n"+publicKeyPEM(publicKey));

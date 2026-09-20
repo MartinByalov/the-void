@@ -3,7 +3,17 @@ import { getArtifactBySerial, generateBatchRegistry } from "./void-lexicon.js";
 
 const app = document.querySelector("#app"), $ = s => document.querySelector(s);
 const api = async (u, o = {}) => { let r = await fetch(u, { headers: { "content-type": "application/json" }, ...o }), x = await r.json(); if (!r.ok) throw Error(x.error || r.statusText); return x };
-let timer = null, presenceTimer = null, visitorTimer = null, voidSnake = null, current = null, local = [], homeArchive = [], liveVisitors = 0, activeWitnesses = 0, selectedSecretSet = "", feedEvents = [], feedSnapshot = null, feedRenderSnapshot = null, chatSnapshot = null;
+let timer = null, presenceTimer = null, visitorTimer = null, voidSnake = null, current = null, local = [], homeArchive = [], liveVisitors = 0, activeWitnesses = 0, selectedSecretSet = "", collectionMode = "owned", feedEvents = [], feedSnapshot = null, feedRenderSnapshot = null, chatSnapshot = null;
+
+let sid = sessionStorage.getItem("void_session");
+if (!sid) {
+  sid = crypto.randomUUID();
+  sessionStorage.setItem("void_session", sid);
+}
+
+function setTabTitle(active, seconds = 0) {
+  document.title = active ? `THE VOID · ${fmt(seconds)}` : "THE VOID";
+}
 
 // Evolving instances registry stored in client storage
 let evolvingInstances = {};
@@ -134,27 +144,78 @@ function ensureInstanceRecord(artifact) {
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
 const fmt = s => `${String(Math.floor((s || 0) / 3600)).padStart(2, "0")}:${String(Math.floor((s || 0) % 3600 / 60)).padStart(2, "0")}:${String(Math.floor((s || 0) % 60)).padStart(2, "0")}`;
+const fmtWarp = s => {
+  let total = Math.max(0, Math.floor(s || 0));
+  let mins = String(Math.floor(total / 60)).padStart(2, "0");
+  let secs = String(total % 60).padStart(2, "0");
+  return `${mins}:${secs}`;
+};
+
+function getAnonymousClaimId() {
+  let id = localStorage.getItem("void_claim_id");
+  if (!id) {
+    id = "CLAIM-" + (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2) + Date.now().toString(36));
+    localStorage.setItem("void_claim_id", id);
+  }
+  return id;
+}
+
+function mapWarpToLot(warp) {
+  if (!warp || !warp.artifact || warp.state === "IDLE") return null;
+  let a = warp.artifact;
+  let isClaimed = warp.state === "CLAIMED";
+  let myClaimId = getAnonymousClaimId();
+  let isWinner = isClaimed && (warp.claimedBy === myClaimId);
+  return {
+    id: warp.warpId,
+    state: warp.state,
+    spawnedAt: warp.spawnedAt,
+    claim_label: isClaimed ? "LOOTED" : "OPEN",
+    joined: true,
+    winner: isWinner,
+    found_owner: isClaimed,
+    revealed: isClaimed ? a : null,
+    artifact: a,
+    claimAttempts: warp.claimAttempts || 0,
+    outcome: warp.outcome,
+    isVoidSpawn: true,
+  };
+}
+
+const kv = (k, v) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`;
 const weirdnessTier = value => ["COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY", "MYTHIC", "DIVINE"][Math.min(6, Math.floor(Math.max(0, Math.min(100, Number(value) || 0)) / (101 / 7)))];
 
 function cv(a) {
-  if (a && a.imageUrl) {
+  let imgUrl = a?.imageUrl || (a?.artifactId ? `/api/artifact/${encodeURIComponent(a.artifactId)}/image` : null);
+  if (imgUrl) {
     let wrap = document.createElement("div");
     wrap.className = "vector-card-art render-3d-art";
     let img = document.createElement("img");
-    img.src = a.imageUrl;
+    img.src = imgUrl;
     img.alt = a.name || "";
     img.className = "fluent-3d-img";
     img.referrerPolicy = "no-referrer";
     img.onerror = () => {
-      if (a.svg) {
+      wrap.innerHTML = "";
+      if (a?.svg) {
         wrap.className = "vector-card-art";
         wrap.innerHTML = a.svg;
+      } else {
+        let c = document.createElement("canvas");
+        c.width = c.height = 24;
+        let g = c.getContext("2d");
+        for (let y = 0; y < 24; y++) for (let x = 0; x < 24; x++) {
+          g.fillStyle = a?.pixels?.[y]?.[x] || "#050b14";
+          g.fillRect(x, y, 1, 1);
+        }
+        wrap.className = "";
+        wrap.append(c);
       }
     };
     wrap.append(img);
     let badge = document.createElement("span");
     badge.className = "fluent-badge";
-    badge.textContent = "PROTOTYPE";
+    badge.textContent = "RENDER";
     wrap.append(badge);
     return wrap;
   }
@@ -201,7 +262,7 @@ async function route() {
   clearInterval(visitorTimer);
   setTabTitle(false);
   nav();
-  visitorTimer = setInterval(refreshActivity, 5000);
+  visitorTimer = setInterval(refreshActivity, 10000);
   if (location.pathname !== "/" && location.pathname !== "/void") refreshActivity();
   
   let p = location.pathname;
@@ -217,177 +278,589 @@ async function route() {
   app.innerHTML = '<section class="panel wide empty">NOTHING IS HERE.</section>';
 }
 
-async function voidHome() {
-  sys("THE VOID // WARP SIGNAL");
+function addFeedEvent(event) {
+  let key = event.key || `${Date.now()}-${Math.random()}`;
+  if (feedEvents.some(e => e.key === key)) return;
+  feedEvents.unshift({
+    key,
+    time: event.time || new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    html: event.html || esc(event.text || "")
+  });
+  if (feedEvents.length > 30) feedEvents.length = 30;
+  renderFeed();
+}
+
+let lastChatHash = "";
+
+function renderFeed() {
+  let f = $("#feed");
+  if (!f) return;
+  f.innerHTML = feedEvents.map(e => `
+    <div class="event" data-feed-key="${esc(e.key)}">
+      <time>${esc(e.time)}</time>
+      <div>${e.html}</div>
+    </div>
+  `).join("");
+}
+
+function syncFeed(activity, l) {
+  if (!l) return;
+  if (l.state) {
+    addFeedEvent({
+      key: `warp-state-${l.id}-${l.state}`,
+      html: `<a class="event-link" href="/void" data-link>The Warp #${l.id}</a>: The Warp changed state to ${esc(l.state)}.`
+    });
+  }
+  let souls = activity?.current?.participants || 0;
+  if (souls > 0) {
+    addFeedEvent({
+      key: `warp-presence-${l.id}-${souls}`,
+      html: `A soul entered The Void.`
+    });
+  }
+}
+
+async function refreshActivity() {
+  if (document.hidden) return;
   try {
-    const result = await VoidAPI.getWarp();
-    current = result?.warp || null;
-  } catch (error) {
-    console.error("THE VOID WARP ERROR:", error);
-    current = null;
-  }
-  homeArchive = [];
-  drawHome(current, homeArchive);
+    let act = await api("/api/activity");
+    activeWitnesses = act?.current?.participants || 0;
+    liveVisitors = act?.current?.live_visitors || 0;
+    let aw = $("#active-witnesses");
+    if (aw) aw.textContent = activeWitnesses;
+    if (current) syncFeed(act, current);
+    await refreshChat();
+  } catch (err) {}
+}
 
-  timer = setInterval(async () => {
-    try {
-      const result = await VoidAPI.getWarp();
-      const next = result?.warp || null;
-      const before = current ? `${current.warpId}|${current.state}|${current.artifact?.id || ""}|${current.claimedAt || ""}|${current.archivedAt || ""}` : "NONE";
-      const after = next ? `${next.warpId}|${next.state}|${next.artifact?.id || ""}|${next.claimedAt || ""}|${next.archivedAt || ""}` : "NONE";
-      current = next;
-      if (before !== after) drawHome(current, homeArchive);
-      else updateHome(current);
-    } catch (error) {
-      console.error("WARP refresh failed:", error);
+async function refreshChat() {
+  try {
+    let data = await api("/api/chat");
+    let container = $("#warp-chat-messages");
+    if (!container) return;
+    let msgs = data?.messages || [];
+    let chatHash = JSON.stringify(msgs);
+    if (chatHash === lastChatHash) return; // Prevent unnecessary DOM flicker
+    lastChatHash = chatHash;
+    
+    if (!msgs.length) {
+      container.innerHTML = '<div class="chat-empty">NO ACTIVE SIGNAL.</div>';
+      return;
     }
-  }, 5000);
-
-  presenceTimer = setInterval(() => updateHome(current), 1000);
+    container.innerHTML = msgs.map(m => `
+      <div class="chat-message ${m.mode === "TRADE" ? "trade-msg" : ""}">
+        <span class="chat-name">${esc(m.name)}</span>
+        <span class="chat-text">${esc(m.text)}</span>
+      </div>
+    `).join("");
+    container.scrollTop = container.scrollHeight;
+  } catch (err) {}
 }
 
-async function refreshActivity() { return; }
-async function refreshChat() { return; }
-
-function getWarpElapsedSeconds(warp) {
-  if (!warp?.spawnedAt) return 0;
-  const start = Number(warp.spawnedAt);
-  if (!Number.isFinite(start)) return 0;
-  const end = Number(warp.claimedAt || warp.archivedAt || Date.now());
-  return Number.isFinite(end) ? Math.max(0, Math.floor((end - start) / 1000)) : 0;
-}
-
-function formatWarpTime(totalSeconds) {
-  const seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const sec = seconds % 60;
-  return h > 0
-    ? [h, String(m).padStart(2, "0"), String(sec).padStart(2, "0")].join(":")
-    : [String(m).padStart(2, "0"), String(sec).padStart(2, "0")].join(":");
-}
-
-function getVoidClaimId() {
-  const key = "void_claim_id";
-  let id = localStorage.getItem(key);
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(key, id);
-  }
-  return id;
-}
-
-function drawHome(warp, arc = []) {
-  if (!warp || warp.state === "IDLE" || !warp.artifact) {
-    sys("THE VOID // NO ACTIVE WARP");
-    app.innerHTML = `
-      <section class="platform">
-        <aside class="panel feedpanel"><h3>LIVE FEED</h3><div id="feed"><div class="event"><time>--:--</time><div>THE VOID is waiting for the next signal.</div></div></div></aside>
-        <section class="panel lotpanel">
-          <div class="panel-title"><h2>NO ACTIVE ARTIFACT</h2></div>
-          <div class="lotgrid">
-            <div><div class="artifact-stage" id="stage"><button class="mystery" type="button" aria-label="Open The Void support window"><span class="mystery-question">?</span></button></div><div class="activity-strip"><span>WARP: <b>OFFLINE</b></span></div><div id="trace-slot"></div></div>
-            <div id="lotdetails"><div class="lot-kicker">THE VOID IS QUIET</div><p>No Artifact is currently passing through the WARP.</p><div class="statbox current-lot-stats">${kv("Classification", "???")}${kv("Rarity", "???")}${kv("Origin", "???")}${kv("Weirdness", "???")}</div><p class="condition">Awaiting the next signal...</p></div>
-          </div>
-        </section>
-        <section id="warp-chat" class="panel warp-chat"><div class="warp-chat-head"><h3>WARP TELEMETRY</h3></div><div class="chat-empty">NO ACTIVE SIGNAL.</div></section>
-        <section class="panel recentpanel"><div class="panel-title"><h2>RECENTLY DISCOVERED</h2></div><div class="recent-slider"><div class="recentgrid" id="recent"></div></div></section>
-      </section>`;
-    const mystery = $("#stage .mystery");
-    if (mystery) mystery.onclick = showAbout;
-    drawRecent(arc.slice(0, 12));
-    setTabTitle(false);
-    return;
-  }
-
-  const a = warp.artifact;
-  const warpId = warp.warpId ?? "?";
-  const elapsed = formatWarpTime(getWarpElapsedSeconds(warp));
-  const active = warp.state === "ACTIVE";
-  const claimed = warp.state === "CLAIMED";
-  const gone = warp.state === "ARCHIVED";
-  sys(`WARP #${warpId} // ${esc(warp.state || "UNKNOWN")}`);
-
-  app.innerHTML = `
-    <section class="platform">
-      <aside class="panel feedpanel"><h3>LIVE FEED</h3><div id="feed"><div class="event"><time>LIVE</time><div>WARP #${esc(warpId)} is ${active ? "active" : esc(String(warp.state || "unknown").toLowerCase())}.</div></div><div class="event"><time>VOID</time><div>${claimed ? "The Artifact has been claimed." : gone ? "The trace has disappeared." : "An unknown Artifact is passing through the signal."}</div></div></div></aside>
-      <section class="panel lotpanel">
-        <div class="panel-title"><h2>${claimed ? esc(a.name || "ARTIFACT") : gone ? "TRACE LOST" : "UNKNOWN ARTIFACT"}</h2></div>
-        <div class="lotgrid">
-          <div><div class="artifact-stage" id="stage"></div><div class="activity-strip"><span>WARP: <b>#${esc(warpId)}</b></span><span>ELAPSED: <b id="warp-elapsed">${elapsed}</b></span></div><div id="trace-slot"></div></div>
-          <div id="lotdetails">
-            <div class="lot-kicker">CURRENT WARP #${esc(warpId)}</div>
-            <p>${claimed ? "The Artifact has emerged from THE VOID." : gone ? "Only a trace remains." : "Its true nature is hidden... for now."}</p>
-            <div class="statbox current-lot-stats">
-              ${kv("Classification", claimed ? (a.classification || a.taxonomy?.classType || "UNKNOWN") : "???")}
-              <div class="rarity-row"><span>Rarity</span><b><span class="rarity ${claimed ? esc(a.rarity || "") : "hidden-rarity"}">${claimed ? esc(a.rarity || "UNKNOWN") : "???"}</span></b></div>
-              ${kv("Origin", claimed ? (a.taxonomy?.category || "UNKNOWN") : "???")}
-              ${kv("Weirdness", claimed ? String(a.weirdness ?? "UNKNOWN") : "???")}
-            </div>
-            <p class="condition">${active ? "The condition is unknown." : claimed ? "CLAIMED." : "THE VOID HAS CLOSED."}</p>
-            <div class="participation-actions lot-action-height">
-              ${active ? `<button class="join" id="warp-claim-timer" type="button" title="Attempt claim"><span id="warp-claim-clock">${elapsed}</span></button><div id="warp-claim-message" class="muted" style="min-height:24px;margin-top:10px"></div>` : `<button class="join joined" type="button" disabled><span>${elapsed}</span></button>`}
-            </div>
-          </div>
-        </div>
-      </section>
-      <section id="warp-chat" class="panel warp-chat"><div class="warp-chat-head"><h3>WARP TELEMETRY</h3></div><div class="chat-empty">SIGNAL ${esc(a.id || "UNKNOWN")} DETECTED · ${claimed ? "ARTIFACT CLAIMED" : gone ? "TRACE CLOSED" : "CONTENT SEALED"}</div></section>
-      <section class="panel recentpanel"><div class="panel-title"><h2>RECENTLY DISCOVERED</h2></div><div class="recent-slider"><div class="recentgrid" id="recent"></div><button class="recent-nav recent-nav-prev" id="recent-prev" type="button" aria-label="Show previous discoveries">←</button><button class="recent-nav recent-nav-next" id="recent-next" type="button" aria-label="Show next discoveries">→</button></div></section>
-    </section>`;
-
-  const st = $("#stage");
-  if (st) {
-    const mystery = document.createElement("button");
-    mystery.type = "button";
-    mystery.className = `mystery mystery-shape-${Math.abs(Number(warpId) || 0) % 20}`;
-    mystery.setAttribute("aria-label", "Open The Void support window");
-    mystery.innerHTML = '<span class="mystery-question">?</span>';
-    mystery.onclick = showAbout;
-    st.append(mystery);
-    setupSecretStage(st, mystery);
-  }
-
-  drawRecent(arc.slice(0, 12));
-  if (active) bindClaimButton();
-  updateHome(warp);
-}
-
-function bindClaimButton() {
-  const button = $("#warp-claim-timer");
-  if (!button) return;
-  button.onclick = async () => {
-    if (button.disabled) return;
-    const message = $("#warp-claim-message");
-    button.disabled = true;
-    try {
-      const result = await VoidAPI.claimWarp(getVoidClaimId());
-      if (result.result === "NOT_YET") {
-        if (message) message.textContent = "NOTHING HAPPENED.";
-        setTimeout(() => { const m = $("#warp-claim-message"); if (m) m.textContent = ""; }, 1800);
-        return;
-      }
-      if (result.result === "CLAIMED" || result.result === "GONE") {
-        current = result.warp || current;
-        drawHome(current, homeArchive);
-        return;
-      }
-      if (message) message.textContent = "THE VOID DID NOT RESPOND.";
-    } catch (error) {
-      console.error("CLAIM ERROR:", error);
-      if (message) message.textContent = "THE VOID DID NOT RESPOND.";
-    } finally {
-      if (document.body.contains(button)) button.disabled = false;
+function setupSecretStage(st, mystery) {
+  let attempts = 0;
+  mystery.onclick = () => {
+    attempts++;
+    if (attempts < 4) {
+      showAbout();
+    } else {
+      startVoidSnake(st);
     }
   };
 }
 
-function updateHome(warp) {
-  if (!warp) { setTabTitle(false); return; }
-  const seconds = getWarpElapsedSeconds(warp);
-  const elapsed = formatWarpTime(seconds);
-  if ($("#warp-elapsed")) $("#warp-elapsed").textContent = elapsed;
-  if ($("#warp-claim-clock")) $("#warp-claim-clock").textContent = elapsed;
-  setTabTitle(warp.state === "ACTIVE", seconds);
+function stopVoidSnake() {
+  if (voidSnake) {
+    if (voidSnake.timer) clearInterval(voidSnake.timer);
+    if (voidSnake.onKey) document.removeEventListener("keydown", voidSnake.onKey);
+    voidSnake.element?.remove();
+    document.querySelector(".artifact-stage")?.classList.remove("snake-active");
+    voidSnake = null;
+  }
+}
+
+function startVoidSnake(container) {
+  stopVoidSnake();
+  const columns = 24, rows = 12;
+  const canvas = document.createElement("canvas");
+  canvas.width = columns * 10;
+  canvas.height = rows * 10;
+  canvas.className = "void-snake-canvas";
+  container.classList.add("snake-active");
+  container.append(canvas);
+
+  let snake = [{ x: 12, y: 6 }, { x: 11, y: 6 }, { x: 10, y: 6 }];
+  let direction = { x: 1, y: 0 };
+  let food = { x: 18, y: 6 };
+  let ctx = canvas.getContext("2d");
+
+  function spawnFood() {
+    food = {
+      x: Math.floor(Math.random() * columns),
+      y: Math.floor(Math.random() * rows)
+    };
+  }
+
+  function onKey(e) {
+    if (e.key === "ArrowUp" && direction.y === 0) direction = { x: 0, y: -1 };
+    else if (e.key === "ArrowDown" && direction.y === 0) direction = { x: 0, y: 1 };
+    else if (e.key === "ArrowLeft" && direction.x === 0) direction = { x: -1, y: 0 };
+    else if (e.key === "ArrowRight" && direction.x === 0) direction = { x: 1, y: 0 };
+    else if (e.key === "Escape") stopVoidSnake();
+  }
+  document.addEventListener("keydown", onKey);
+
+  let timer = setInterval(() => {
+    let head = {
+      x: (snake[0].x + direction.x + columns) % columns,
+      y: (snake[0].y + direction.y + rows) % rows
+    };
+    if (snake.some(s => s.x === head.x && s.y === head.y)) {
+      stopVoidSnake();
+      return;
+    }
+    snake.unshift(head);
+    if (head.x === food.x && head.y === food.y) {
+      spawnFood();
+    } else {
+      snake.pop();
+    }
+    ctx.fillStyle = "#050b14";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#8b5cff";
+    ctx.fillRect(food.x * 10, food.y * 10, 9, 9);
+    ctx.fillStyle = "#d8e4f6";
+    snake.forEach(s => ctx.fillRect(s.x * 10, s.y * 10, 9, 9));
+  }, 100);
+
+  voidSnake = { timer, onKey, element: canvas };
+}
+
+function updateWinnerAction(l) {
+  const btn = $("#winner-contribute");
+  if (!btn) return;
+  if (l?.winner) {
+    btn.removeAttribute("hidden");
+    btn.style.display = "inline-flex";
+    btn.onclick = contribute;
+  } else {
+    btn.setAttribute("hidden", "");
+    btn.style.display = "none";
+  }
+}
+
+let isClaimCooldown = false;
+
+async function voidHome() {
+  sys("THE VOID // WARP SIGNAL");
+  let warpRes = null;
+  try {
+    warpRes = await VoidAPI.fetchActiveWarp();
+  } catch (e) {
+    warpRes = null;
+  }
+
+  if (warpRes?.warp && (warpRes.active || warpRes.warp.state === "CLAIMED" || warpRes.warp.phase === "CHARGING" || warpRes.warp.phase === "LOOT_OPEN")) {
+    current = {
+      id: warpRes.warp.serialIndex || warpRes.warp.id || 1,
+      state: warpRes.warp.state,
+      phase: warpRes.warp.phase,
+      spawnedAt: warpRes.warp.spawnedAt,
+      materializesAt: warpRes.warp.materializesAt,
+      expiresAt: warpRes.warp.expiresAt,
+      isMaterialized: warpRes.warp.isMaterialized,
+      lootRemainingMs: warpRes.warp.lootRemainingMs,
+      claim_label: warpRes.warp.state === "CLAIMED" ? "LOOTED" : (warpRes.warp.isMaterialized ? "LOOT OPEN" : "CHARGING"),
+      joined: true,
+      winner: warpRes.warp.claimedBy === getAnonymousClaimId(),
+      found_owner: warpRes.warp.state === "CLAIMED",
+      revealed: warpRes.warp.isMaterialized ? warpRes.warp : (warpRes.warp.state === "CLAIMED" ? warpRes.warp : null),
+      artifact: warpRes.warp,
+      rarity: warpRes.warp.rarity,
+      name: warpRes.warp.name,
+      classification: warpRes.warp.category || "ARTIFACT",
+      weirdness: warpRes.warp.stats?.power || 75,
+      lore: warpRes.warp.description
+    };
+  } else {
+    try {
+      current = await api("/api/lot");
+    } catch (error) {
+      current = null;
+    }
+  }
+
+  try {
+    homeArchive = await api("/api/archive");
+  } catch (error) {
+    homeArchive = [];
+  }
+
+  drawHome(current, homeArchive);
+  await refreshActivity();
+  await refreshChat();
+
+  // Authoritative Monotonic Timer Loop
+  if (presenceTimer) clearInterval(presenceTimer);
+  presenceTimer = setInterval(() => {
+    if (current && current.spawnedAt) {
+      const nowAuth = VoidAPI.getAuthoritativeNow();
+      if (!current.isMaterialized && current.materializesAt && nowAuth >= current.materializesAt) {
+        current.isMaterialized = true;
+        current.phase = "LOOT_OPEN";
+        current.claim_label = "LOOT OPEN";
+        drawHome(current, homeArchive);
+      }
+      if (current.isMaterialized && current.expiresAt) {
+        current.lootRemainingSeconds = Math.max(0, Math.floor((current.expiresAt - nowAuth) / 1000));
+        current.my_presence_seconds = current.lootRemainingSeconds;
+      } else {
+        current.my_presence_seconds = Math.max(0, Math.floor((nowAuth - current.spawnedAt) / 1000));
+      }
+    } else if (current) {
+      current.my_presence_seconds = (current.my_presence_seconds || 0) + 1;
+    }
+    updateHome(current);
+  }, 1000);
+}
+
+function updateHome(l) {
+  if (!l) { setTabTitle(false); return; }
+  let seconds = l.my_presence_seconds || 0;
+  let elapsed = fmtWarp(seconds);
+  if ($("#presence-clock") && !isClaimCooldown) {
+    $("#presence-clock").textContent = elapsed;
+  }
+  if ($("#active-witnesses")) $("#active-witnesses").textContent = activeWitnesses;
+  if ($("#claim-under-stage")) $("#claim-under-stage").textContent = l.claim_label || "NONE";
+  setTabTitle(true, seconds);
+  updateWinnerAction(l);
+}
+
+function drawHome(l, arc = []) {
+  if (!l) {
+    sys("THE VOID // NO ACTIVE WARP");
+    app.innerHTML = `
+      <section class="platform">
+        <aside class="panel feedpanel"><h3>LIVE FEED</h3><div id="feed"></div></aside>
+        <section class="panel lotpanel">
+          <div class="panel-title"><h2>NO ACTIVE ARTIFACT</h2></div>
+          <div class="lotgrid">
+            <div>
+              <div class="artifact-stage" id="stage"><button class="mystery" type="button" aria-label="Open The Void support window"><span class="mystery-question">?</span></button></div>
+              <div class="activity-strip"><span>ACTIVE SOULS: <b><i class=live-dot></i><span id=active-witnesses>${activeWitnesses}</span></b></span></div>
+              <div id="trace-slot"></div>
+            </div>
+            <div id="lotdetails">
+              <div class="lot-kicker">THE VOID IS QUIET</div>
+              <p>No Artifact is currently passing through the WARP.</p>
+              <div class="statbox current-lot-stats">
+                ${kv("Classification", "???")}
+                <div class="rarity-row"><span>Rarity</span><b><span class="rarity hidden-rarity">???</span></b></div>
+                ${kv("Origin", "???")}
+                ${kv("Weirdness", "???")}
+              </div>
+              <p class="condition">Awaiting the next signal...</p>
+            </div>
+          </div>
+        </section>
+        <section id="warp-chat" class="panel warp-chat"><div class="warp-chat-head"><h3>CHAT</h3><label class="chat-trade-mode"><input type="checkbox" disabled> <span>TRADE</span></label></div><div class="chat-empty">NO ACTIVE SIGNAL.</div></section>
+        <section class="panel recentpanel"><div class="panel-title"><h2>RECENTLY DISCOVERED</h2></div><div class="recent-slider"><div class="recentgrid" id="recent"></div><button class="recent-nav recent-nav-prev" id="recent-prev" type="button" aria-label="Show previous discoveries">←</button><button class="recent-nav recent-nav-next" id="recent-next" type="button" aria-label="Show next discoveries">→</button></div></section>
+      </section>`;
+    const mystery = $("#stage .mystery");
+    if (mystery) {
+      mystery.onclick = showAbout;
+      setupSecretStage($("#stage"), mystery);
+    }
+    drawRecent(arc.slice(0, 12));
+    renderFeed();
+    setTabTitle(false);
+    return;
+  }
+
+  updateWinnerAction(l);
+  let seconds = l.my_presence_seconds || 0;
+
+  if (l.revealed && l.state === "CLAIMED") {
+    let a = l.revealed;
+    if (l.winner) addToCollection(a);
+    sys(`WARP #${l.id} // REVEALED`);
+    app.innerHTML = `
+      <section class="platform">
+        <aside class="panel feedpanel"><h3>LIVE FEED</h3><div id="feed"></div></aside>
+        <section class="panel lotpanel reveal-panel">
+          <div class="panel-title"><h2>${esc(a.name || "NEW DISCOVERY")}</h2></div>
+          <div class="lotgrid">
+            <div>
+              <div class="artifact-stage" id="stage"></div>
+              <div class="activity-strip">
+                <span>ACTIVE SOULS: <b><i class=live-dot></i><span id=active-witnesses>${activeWitnesses}</span></b></span>
+                <span>CLAIM: <b id=claim-under-stage>${esc(l.claim_label)}</b></span>
+              </div>
+              <div id="trace-slot">
+                ${l.winner ? `<a class="trace-note" href="/collection" data-link>YOUR PRESENCE LEFT A TRACE</a>` : `<div class="trace-note reveal-owner-note">${esc(a.name)} FOUND ITS NEW OWNER</div>`}
+              </div>
+            </div>
+            <div id="lotdetails">
+              <div class="reveal-panel">
+                <div class="lot-kicker">CURRENT WARP #${esc(l.id)}</div>
+                <h1>${esc(a.name)}</h1>
+                <p>${esc(a.lore || a.description || "")}</p>
+                <div class="statbox">
+                  ${kv("Classification", a.classification || "ARTIFACT")}
+                  ${kv("Rarity", `<span class="rarity ${esc(a.rarity)}">${esc(a.rarity)}</span>`)}
+                  ${kv("Weirdness", `<span class="detail-weirdness weirdness-val ${weirdnessTier(a.weirdness)}">${esc(a.weirdness)}</span>`)}
+                  ${kv("Status", "ARCHIVED")}
+                </div>
+                <p class="condition">${l.winner ? "The artifact has surfaced.<br>Its record is now permanent." : "The artifact surfaced for another SOUL.<br>Its record is now permanent."}</p>
+              </div>
+              <div class="participation-actions lot-action-height">
+                <button class="join" id="join-next" type="button">JOIN THE WARP</button>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section id="warp-chat" class="panel warp-chat">
+          <div class="warp-chat-head"><h3>CHAT</h3><label class="chat-trade-mode"><input id="chat-trade-mode" type="checkbox"> <span>TRADE</span></label></div>
+          <div id="warp-chat-messages" class="chat-messages"></div>
+          <form class="chat-form" id="chat-form">
+            <input id="chat-input" maxlength="280" placeholder="SEND A MESSAGE..." aria-label="Send a chat message">
+            <button type="submit">SEND</button>
+          </form>
+        </section>
+        <section class="panel recentpanel">
+          <div class="panel-title"><h2>RECENTLY DISCOVERED</h2></div>
+          <div class="recent-slider">
+            <div class="recentgrid" id="recent"></div>
+            <button class="recent-nav recent-nav-prev" id="recent-prev" type="button" aria-label="Show previous discoveries">←</button>
+            <button class="recent-nav recent-nav-next" id="recent-next" type="button" aria-label="Show next discoveries">→</button>
+          </div>
+        </section>
+      </section>
+    `;
+
+    const st = $("#stage");
+    if (st) {
+      let heroCanvas = cv(a);
+      heroCanvas.className = "hero-pixel reveal-artifact";
+      st.append(heroCanvas);
+    }
+    $("#join-next") && ($("#join-next").onclick = voidHome);
+  } else if (l.isMaterialized && l.state === "ACTIVE") {
+    // MATERIALIZED! 60s LOOT WINDOW ACTIVE!
+    let a = l.artifact;
+    sys(`WARP #${l.id} // MATERIALIZED · 60s LOOT WINDOW`);
+    app.innerHTML = `
+      <section class="platform">
+        <aside class="panel feedpanel"><h3>LIVE FEED</h3><div id="feed"></div></aside>
+        <section class="panel lotpanel reveal-panel">
+          <div class="panel-title"><h2 class="rarity-name ${esc(a.rarity)}">${esc(a.name || "MATERIALIZED RELIC")}</h2></div>
+          <div class="lotgrid">
+            <div>
+              <div class="artifact-stage" id="stage"></div>
+              <div class="activity-strip">
+                <span>ACTIVE SOULS: <b><i class=live-dot></i><span id=active-witnesses>${activeWitnesses}</span></b></span>
+                <span>LOOT: <b id=claim-under-stage style="color:#5ee893">LOOT OPEN (60s)</b></span>
+              </div>
+              <div id="trace-slot"><div class="trace-note" style="color:#5ee893">⚡ MATERIALIZED FROM THE VOID · CLAIM BEFORE DISSOLUTION</div></div>
+            </div>
+            <div id="lotdetails">
+              <div class="reveal-panel">
+                <div class="lot-kicker">CURRENT WARP #${esc(l.id)} · MATERIALIZED</div>
+                <h1 class="rarity-name ${esc(a.rarity)}">${esc(a.name)}</h1>
+                <p>${esc(a.lore || a.description || "The relic has emerged from the depths of the Void.")}</p>
+                <div class="statbox">
+                  ${kv("Classification", a.classification || "ARTIFACT")}
+                  ${kv("Rarity", `<span class="rarity ${esc(a.rarity)}">${esc(a.rarity)}</span>`)}
+                  ${kv("Weirdness", `<span class="detail-weirdness weirdness-val ${weirdnessTier(a.weirdness)}">${esc(a.weirdness)}</span>`)}
+                  ${kv("Status", "MATERIALIZED")}
+                </div>
+                <p class="condition">Loot window open for 1 minute only.<br>First soul to claim secures the relic.</p>
+              </div>
+              <div class="participation-actions lot-action-height">
+                <button class="join loot-active-btn" id="warp-claim-timer-btn" type="button" aria-label="Loot Materialized Relic">
+                  <span>⚡ LOOT ARTIFACT (<span id="presence-clock">${fmtWarp(l.my_presence_seconds || 60)}</span>)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section id="warp-chat" class="panel warp-chat">
+          <div class="warp-chat-head"><h3>CHAT</h3><label class="chat-trade-mode"><input id="chat-trade-mode" type="checkbox"> <span>TRADE</span></label></div>
+          <div id="warp-chat-messages" class="chat-messages"></div>
+          <form class="chat-form" id="chat-form">
+            <input id="chat-input" maxlength="280" placeholder="SEND A MESSAGE..." aria-label="Send a chat message">
+            <button type="submit">SEND</button>
+          </form>
+        </section>
+        <section class="panel recentpanel">
+          <div class="panel-title"><h2>RECENTLY DISCOVERED</h2></div>
+          <div class="recent-slider">
+            <div class="recentgrid" id="recent"></div>
+            <button class="recent-nav recent-nav-prev" id="recent-prev" type="button" aria-label="Show previous discoveries">←</button>
+            <button class="recent-nav recent-nav-next" id="recent-next" type="button" aria-label="Show next discoveries">→</button>
+          </div>
+        </section>
+      </section>
+    `;
+
+    const st = $("#stage");
+    if (st) {
+      let heroCanvas = cv(a);
+      heroCanvas.className = "hero-pixel reveal-artifact";
+      st.append(heroCanvas);
+    }
+  } else {
+    // CHARGING PHASE (Timer counts up 00:00 -> Target)
+    sys(`WARP #${l.id} // CHARGING ESSENCE`);
+    app.innerHTML = `
+      <section class="platform">
+        <aside class="panel feedpanel"><h3>LIVE FEED</h3><div id="feed"></div></aside>
+        <section class="panel lotpanel">
+          <div class="panel-title"><h2>UNKNOWN ARTIFACT</h2></div>
+          <div class="lotgrid">
+            <div>
+              <div class="artifact-stage" id="stage"></div>
+              <div class="activity-strip">
+                <span>ACTIVE SOULS: <b><i class=live-dot></i><span id=active-witnesses>${activeWitnesses}</span></b></span>
+                <span>CLAIM: <b id=claim-under-stage>${esc(l.claim_label)}</b></span>
+              </div>
+              <div id="trace-slot">
+                ${l.joined ? `<a class="trace-note" href="/collection" data-link>YOUR PRESENCE LEFT A TRACE</a>` : ""}
+              </div>
+            </div>
+            <div id="lotdetails">
+              <div class="lot-kicker">CURRENT WARP #${esc(l.id)}</div>
+              <p>Its true nature is hidden... for now.</p>
+              <div class="statbox current-lot-stats">
+                ${kv("Classification", "???")}
+                <div class="rarity-row"><span>Rarity</span><b><span class="rarity hidden-rarity">???</span></b></div>
+                ${kv("Origin", "???")}
+                ${kv("Weirdness", "???")}
+              </div>
+              <p class="condition">Closing condition unknown.<br>Stay awhile and do whatever...</p>
+              <div class="participation-actions lot-action-height">
+                <button class="join joined claim-timer-btn" id="warp-claim-timer-btn" type="button" aria-label="Presence recorded in The Void">
+                  <span id="presence-clock">${fmtWarp(seconds)}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section id="warp-chat" class="panel warp-chat">
+          <div class="warp-chat-head"><h3>CHAT</h3><label class="chat-trade-mode"><input id="chat-trade-mode" type="checkbox"> <span>TRADE</span></label></div>
+          <div id="warp-chat-messages" class="chat-messages"></div>
+          <form class="chat-form" id="chat-form">
+            <input id="chat-input" maxlength="280" placeholder="SEND A MESSAGE..." aria-label="Send a chat message">
+            <button type="submit">SEND</button>
+          </form>
+        </section>
+        <section class="panel recentpanel">
+          <div class="panel-title"><h2>RECENTLY DISCOVERED</h2></div>
+          <div class="recent-slider">
+            <div class="recentgrid" id="recent"></div>
+            <button class="recent-nav recent-nav-prev" id="recent-prev" type="button" aria-label="Show previous discoveries">←</button>
+            <button class="recent-nav recent-nav-next" id="recent-next" type="button" aria-label="Show next discoveries">→</button>
+          </div>
+        </section>
+      </section>
+    `;
+
+    const st = $("#stage");
+    if (st) {
+      if (l.silhouette_pixels) {
+        st.append(silhouette(l.silhouette_pixels));
+      } else {
+        const mystery = document.createElement("button");
+        mystery.type = "button";
+        mystery.className = `mystery mystery-shape-${Math.abs(Number(l.id) || 0) % 20}`;
+        mystery.setAttribute("aria-label", "Open The Void support window");
+        mystery.innerHTML = '<span class="mystery-question">?</span>';
+        st.append(mystery);
+        setupSecretStage(st, mystery);
+      }
+    }
+  }
+
+  const claimBtn = $("#warp-claim-timer-btn");
+  const handleClaimAction = async () => {
+    if (!claimBtn || claimBtn.disabled || isClaimCooldown) return;
+    claimBtn.disabled = true;
+    claimBtn.classList.add("claiming");
+    isClaimCooldown = true;
+    try {
+      let looterName = getAnonymousClaimId();
+      let res = await VoidAPI.lootWarp(looterName);
+      if (res?.success && (res.outcome === "CLAIMED" || res.state === "CLAIMED" || res.result === "CLAIMED")) {
+        claimBtn.innerHTML = `<span>LOOTED!</span>`;
+        if (res.artifact || res.warp?.item) {
+          addToCollection(res.artifact || res.warp?.item);
+        }
+        showToast("✦ RELIC LOOTED AND BOUND TO YOUR LOCAL VAULT!");
+        setTimeout(() => {
+          isClaimCooldown = false;
+          voidHome();
+        }, 1200);
+      } else if (res?.outcome === "EXPIRED" || res?.result === "GONE") {
+        claimBtn.innerHTML = `<span>LOST TO THE VOID</span>`;
+        setTimeout(() => {
+          isClaimCooldown = false;
+          voidHome();
+        }, 2000);
+      } else {
+        claimBtn.innerHTML = `<span>NOTHING HAPPENED.</span>`;
+        setTimeout(() => {
+          isClaimCooldown = false;
+          claimBtn.disabled = false;
+          claimBtn.classList.remove("claiming");
+          let s = current?.my_presence_seconds || 0;
+          claimBtn.innerHTML = `<span id="presence-clock">${fmtWarp(s)}</span>`;
+        }, 2000);
+      }
+    } catch (err) {
+      claimBtn.innerHTML = `<span>NOTHING HAPPENED.</span>`;
+      setTimeout(() => {
+        isClaimCooldown = false;
+        claimBtn.disabled = false;
+        claimBtn.classList.remove("claiming");
+        let s = current?.my_presence_seconds || 0;
+        claimBtn.innerHTML = `<span id="presence-clock">${fmtWarp(s)}</span>`;
+      }, 2000);
+    }
+  };
+
+  if (claimBtn) {
+    claimBtn.onclick = handleClaimAction;
+  }
+
+  let chatForm = $("#chat-form");
+  if (chatForm) {
+    chatForm.onsubmit = async e => {
+      e.preventDefault();
+      let input = $("#chat-input");
+      let tradeMode = $("#chat-trade-mode");
+      let text = input?.value.trim();
+      if (!text) return;
+      input.value = "";
+      try {
+        await api("/api/chat", {
+          method: "POST",
+          body: JSON.stringify({
+            text,
+            mode: tradeMode?.checked ? "TRADE" : "CHAT"
+          })
+        });
+        await refreshChat();
+      } catch (err) {
+        showToast(err.message || "Failed to transmit message.");
+      }
+    };
+  }
+
+  renderFeed();
+  refreshChat();
+  drawRecent(arc.slice(0, 12));
+  updateHome(l);
 }
 
 function drawRecent(a) {
@@ -436,6 +909,54 @@ function showAbout() {
   document.onkeydown = e => { if (e.key === "Escape") close(); };
 }
 
+function contribute() {
+  $("#modal")?.remove();
+  app.insertAdjacentHTML("beforeend", `
+    <div class="modal" id="modal">
+      <div class="panel modalbox contribution">
+        <button class="modal-x" id="modalx" aria-label="Close">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+            <line x1="2" y1="2" x2="12" y2="12"></line>
+            <line x1="12" y1="2" x2="2" y2="12"></line>
+          </svg>
+        </button>
+        <h2>LEAVE SOMETHING IN THE VOID</h2>
+        <p>Your idea will enter the pool. If accepted, it may surface as an Artifact in a future Warp.</p>
+        <textarea id="contrib-text" maxlength="280" placeholder="Describe an idea, object, or anomaly..."></textarea>
+        <div class="formrow">
+          <span id="contrib-count">0 / 280</span>
+          <button class="join understood-button" id="contrib-send" type="button">LEAVE SOMETHING</button>
+        </div>
+      </div>
+    </div>
+  `);
+  let close = () => $("#modal")?.remove();
+  $("#modalx").onclick = close;
+  $("#modal").onclick = e => { if (e.target.id === "modal") close(); };
+  document.onkeydown = e => { if (e.key === "Escape") close(); };
+
+  let txt = $("#contrib-text"), count = $("#contrib-count");
+  if (txt && count) txt.oninput = () => { count.textContent = `${txt.value.length} / 280`; };
+
+  let send = $("#contrib-send");
+  if (send && txt) {
+    send.onclick = async () => {
+      let val = txt.value.trim();
+      if (val.length < 8) {
+        showToast("Idea is too short (min 8 characters).");
+        return;
+      }
+      try {
+        await api("/api/contribute", { method: "POST", body: JSON.stringify({ text: val }) });
+        close();
+        showToast("THE VOID HAS RECEIVED YOUR OFFERING.");
+      } catch (err) {
+        showToast(err.message || "Failed to submit to The Void.");
+      }
+    };
+  }
+}
+
 async function archive() {
   sys("ARCHIVE SIGNAL ACQUIRED");
   let all = await api("/api/archive"), rarities = ["COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY", "MYTHIC", "DIVINE"];
@@ -463,17 +984,16 @@ function drawArchive(a) {
   }
   for (let x of a) {
     let c = document.createElement("article");
-    c.className = "artifactcard archive-artifact-card record-card";
-    c.tabIndex = 0;
-    c.setAttribute("role", "button");
-    c.setAttribute("aria-label", `Open archive record for ${x.name}`);
-    c.innerHTML = `<small class="record-card-id">#${esc(x.artifact_id)}</small><small class=card-class>${esc(x.classification)}</small><b class="card-name rarity-name ${esc(x.rarity)}">${esc(x.name)}</b><small class=card-weirdness>👁 Weirdness <span class="detail-weirdness weirdness-val ${weirdnessTier(x.weirdness)}">${esc(x.weirdness)}</span></small><small class="record-card-status">ARCHIVED RECORD</small>`;
-    let openRecord = () => {
+    c.className = "artifactcard flip-card archive-artifact-card";
+    c.innerHTML = `<div class="card-face card-front"><div class=cardart><small class="trade-art-id">#${esc(x.artifact_id)}</small></div><div class=cardbody><small class=card-class>${esc(x.classification)}</small><b class="card-name rarity-name ${esc(x.rarity)}">${esc(x.name)}</b><small class=card-weirdness>👁 Weirdness <span class="detail-weirdness weirdness-val ${weirdnessTier(x.weirdness)}">${esc(x.weirdness)}</span></small></div></div><div class="card-face card-back"><span class="void-orb-mark">◉</span><small class="archive-back-id"></small></div>`;
+    c.querySelector(".cardart").append(cv(x));
+    c.onclick = () => c.classList.toggle("is-flipped");
+    let nb = c.querySelector(".card-name");
+    if (nb) nb.onclick = e => {
+      e.stopPropagation();
       history.pushState({}, '', `/archive/${encodeURIComponent(x.artifact_id)}`);
       collectionDetail(x);
     };
-    c.onclick = openRecord;
-    c.onkeydown = event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openRecord(); } };
     g.append(c);
   }
 }
@@ -1238,14 +1758,14 @@ function parse(buf) {
 }
 
 function collection() {
-  sys("COLLECTION // OWNED VAULT & EVOLVING INSTANCES");
+  sys(collectionMode === "owned" ? "COLLECTION // OWNED" : "RELIC EXCHANGE // TRADE MARKET");
   app.innerHTML = `
     <section class="panel wide">
       <div class="archive-top">
         <div>
-          <button class="section-back" id="collection-back" type="button" aria-label="Back to The Void">←</button>
+          ${collectionMode === "owned" ? `<button class="section-back" id="collection-back" type="button" aria-label="Back to The Void">←</button>` : `<button class="section-back exchange-back" id="exchange-back" type="button" aria-label="Back to The Void">←</button>`}
           <div class="eyebrow">LOCAL VAULT &amp; EVOLVING CONSTRUCTS</div>
-          <h1>COLLECTION</h1>
+          <h1>${collectionMode === "owned" ? "COLLECTION" : "EXCHANGE"}</h1>
           <p>Your artifacts live with you, not with THE VOID. Each artifact holds a mutable evolving instance certificate with verified provenance.</p>
         </div>
         <div class="collection-header-controls">
@@ -1269,21 +1789,32 @@ function collection() {
               <option value="94-99">94–99</option>
             </select>
           </div>
+          <button id="tab-trade" class="trade-entry-btn" type="button">${collectionMode === "owned" ? "EXCHANGE" : "COLLECTION"}</button>
         </div>
       </div>
       <div id="collection-view-body"></div>
     </section>
   `;
 
-  $("#collection-back").onclick = () => go("/void");
-  renderOwnedView();
+  if ($("#collection-back")) $("#collection-back").onclick = () => go("/void");
+  if ($("#exchange-back")) $("#exchange-back").onclick = () => go("/void");
+  $("#tab-trade").onclick = () => {
+    collectionMode = collectionMode === "owned" ? "exchange" : "owned";
+    collection();
+  };
+
+  if (collectionMode === "owned") {
+    renderOwnedView();
+  } else {
+    renderExchangeView();
+  }
 }
 
 function renderOwnedView() {
   let b = $("#collection-view-body");
   if (!b) return;
   b.innerHTML = `
-    <div id="drop" class="drop"><div><span class="drop-icon">📦</span>DROP ARTIFACT RECORDS HERE OR CLICK TO IMPORT</div></div>
+    <div id="drop" class="drop"><div><span class="drop-icon">📦</span>DROP ARTIFACT</div></div>
     <div id="csum" class="summary"></div>
     <div id="sets" class="sets"></div>
     <div id="cgrid" class="archivegrid"></div>
@@ -1306,6 +1837,80 @@ function renderOwnedView() {
   ["#collection-sort", "#collection-r"].forEach(x => $(x).onchange = () => { updateRarityFilter($("#collection-r")); drawCollection(); });
   updateRarityFilter($("#collection-r"));
   drawCollection();
+}
+
+function renderExchangeView() {
+  let b = $("#collection-view-body");
+  if (!b) return;
+  b.innerHTML = `
+    <div class="trade-footer-actions">
+      <button class="join trade-publish-btn" id="trade-publish-btn" type="button">TRADE</button>
+    </div>
+    <div id="trades-grid" class="archivegrid"></div>
+  `;
+  $("#trade-publish-btn").onclick = publishTradeArtifact;
+  drawTrades();
+}
+
+function drawTrades() {
+  let g = $("#trades-grid");
+  if (!g) return;
+  g.innerHTML = local.map(a => `
+    <article class="artifactcard trade-card">
+      <div class="cardbody">
+        <span class="badge ${esc(a.rarity)}">${esc(a.rarity)}</span>
+        <b class="card-name">${esc(a.name)}</b>
+      </div>
+    </article>
+  `).join("") || '<div class="empty">NO ACTIVE TRADES</div>';
+}
+
+function publishTradeArtifact() {
+  openTradeCollectionPicker(artifact => {
+    showToast(`Artifact ${artifact.name} listed for trade.`);
+  });
+}
+
+function openTradeCollectionPicker(callback) {
+  $("#modal")?.remove();
+  app.insertAdjacentHTML("beforeend", `
+    <div class="modal" id="modal">
+      <div class="panel modalbox">
+        <button class="modal-x" id="modalx" aria-label="Close">✕</button>
+        <h2>CHOOSE ARTIFACT TO TRADE</h2>
+        <div class="filters">
+          <select id="trade-picker-weirdness">
+            <option value="">ALL WEIRDNESS</option>
+            <option value="0-69">0–69</option>
+            <option value="70-76">70–76</option>
+            <option value="77-85">77–85</option>
+            <option value="86-93">86–93</option>
+            <option value="94-99">94–99</option>
+          </select>
+        </div>
+        <div class="trade-collection-grid">
+          ${local.map(a => `
+            <div class="trade-card" data-id="${esc(a.artifact_id)}">
+              <span class="badge ${esc(a.rarity)}">${esc(a.rarity)}</span>
+              <b>${esc(a.name)}</b>
+              <button class="understood-button" data-pick="${esc(a.artifact_id)}" id="btn-choose-offer-collection" type="button">COLLECTION</button>
+            </div>
+          `).join("") || '<div class="empty">NO ARTIFACTS IN COLLECTION</div>'}
+        </div>
+      </div>
+    </div>
+  `);
+  let close = () => $("#modal")?.remove();
+  $("#modalx").onclick = close;
+  $("#modal").onclick = e => { if (e.target.id === "modal") close(); };
+  document.querySelectorAll("[data-pick]").forEach(btn => {
+    btn.onclick = () => {
+      let id = btn.getAttribute("data-pick");
+      let item = local.find(x => x.artifact_id === id);
+      if (item && callback) callback(item);
+      close();
+    };
+  });
 }
 
 async function load(fs) {
@@ -1365,16 +1970,16 @@ function drawLocalCards() {
   }
 
   for (let x of items) {
-    let inst = ensureInstanceRecord(x);
     let c = document.createElement("article");
-    c.className = "artifactcard collection-card record-card";
-    c.tabIndex = 0;
-    c.setAttribute("role", "button");
-    c.setAttribute("aria-label", `Open collection record for ${x.name}`);
-    c.innerHTML = `<small class="record-card-id">#${esc(x.artifact_id)} · REV ${inst.revision}</small><small class="card-class">${esc(x.classification)}</small><b class="card-name rarity-name ${esc(x.rarity)}">${esc(x.name)}</b><small class="card-weirdness">👁 Weirdness <span class="detail-weirdness weirdness-val ${weirdnessTier(x.weirdness)}">${x.weirdness}</span></small><small class="record-card-status">LOCAL RECORD</small>`;
-    let openRecord = () => collectionDetail(x);
-    c.onclick = openRecord;
-    c.onkeydown = event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openRecord(); } };
+    c.className = "artifactcard flip-card collection-card";
+    c.innerHTML = `<div class="card-face card-front"><div class=cardart><small class="trade-art-id">#${esc(x.artifact_id)}</small></div><div class=cardbody><small class=card-class>${esc(x.classification)}</small><b class="card-name rarity-name ${esc(x.rarity)}">${esc(x.name)}</b><small class=card-weirdness>👁 Weirdness <span class="detail-weirdness weirdness-val ${weirdnessTier(x.weirdness)}">${x.weirdness}</span></small></div></div><div class="card-face card-back"><span class="void-orb-mark">◉</span><small class="collection-back-id"></small></div>`;
+    c.querySelector(".cardart").append(cv(x));
+    c.onclick = () => c.classList.toggle("is-flipped");
+    let nb = c.querySelector(".card-name");
+    if (nb) nb.onclick = e => {
+      e.stopPropagation();
+      collectionDetail(x);
+    };
     g.append(c);
   }
 }
@@ -1424,10 +2029,11 @@ function collectionDetail(a) {
             <button class="archive-close collection-close" id="collection-x" type="button" aria-label="Close modal"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="2" y1="2" x2="12" y2="12"></line><line x1="12" y1="2" x2="2" y2="12"></line></svg></button>
           </div>
           <div class="card-info">
-            <div class="record-identity">
-              <span>ARTIFACT ID</span>
-              <b>#${esc(a.artifact_id)}</b>
-              <small>VISUAL MATERIAL NOT YET GENERATED</small>
+            <div class="card-art-container collection-detail-art">
+              <div class="detailart flip-card detail-flip-card" id="collection-detail-art">
+                <span class="card-face card-front"><small class="trade-art-id">#${esc(a.artifact_id)}</small></span>
+                <span class="card-face card-back"><span class="void-orb-mark">◉</span><small class="detail-back-id"></small></span>
+              </div>
             </div>
             ${a.dictionaryGrounding ? `
               <div class="research-log-box" style="margin-bottom:8px">
@@ -1464,6 +2070,13 @@ function collectionDetail(a) {
     </div>
   `);
 
+  let detailArt = $("#collection-detail-art");
+  if (detailArt) {
+    let f = detailArt.querySelector(".card-front") || detailArt;
+    f.append(cv(a));
+    detailArt.onclick = () => detailArt.classList.toggle("is-flipped");
+  }
+
   let close = () => $("#collection-modal")?.remove();
   
   let resBtn = $("#modal-resonance");
@@ -1495,8 +2108,47 @@ function collectionDetail(a) {
 }
 
 
+const AUTHORIZED_ARCHITECT_EMAIL = "byalov.v.martin@gmail.com";
+
+function getArchitectAuth() {
+  try {
+    const raw = localStorage.getItem("void_vault_architect");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && (parsed.email?.toLowerCase() === AUTHORIZED_ARCHITECT_EMAIL.toLowerCase() || parsed.authorized)) {
+      return parsed;
+    }
+  } catch (e) {}
+  return null;
+}
+
+function setArchitectAuth(user) {
+  localStorage.setItem("void_vault_architect", JSON.stringify(user));
+}
+
+function clearArchitectAuth() {
+  localStorage.removeItem("void_vault_architect");
+}
+
+function parseJwt(token) {
+  try {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+    return JSON.parse(jsonPayload);
+  } catch (e) {
+    return null;
+  }
+}
+
 async function vaultView() {
-  sys("✦ THE VOID PRIVATE VAULT & DISPENSER");
+  sys("✦ THE VOID ARCHITECT CONSOLE");
+  const auth = getArchitectAuth();
+
+  if (!auth) {
+    renderVaultAuthGate();
+    return;
+  }
 
   let apiOnline = false;
   let inventory = {
@@ -1504,30 +2156,83 @@ async function vaultView() {
     totalSpawned: 0,
     isLow: true
   };
+  let currentLot = null;
+  let warpData = null;
 
   try {
-    const status = await VoidAPI.status();
+    const [status, invData, lotRes, warpRes] = await Promise.all([
+      VoidAPI.status().catch(() => ({ ok: false })),
+      VoidAPI.getInventory().catch(() => ({ totalUnspawned: 0, totalSpawned: 0 })),
+      api("/api/lot").catch(() => null),
+      VoidAPI.getWarp().catch(() => null)
+    ]);
+
     apiOnline = status.ok === true;
+    currentLot = lotRes;
+    warpData = warpRes?.warp || null;
 
     if (apiOnline) {
-      inventory = await VoidAPI.getInventory();
+      const count = Number(invData.totalUnspawned ?? invData.unspawnedRemaining ?? 0);
+      inventory = {
+        unspawnedRemaining: count,
+        totalSpawned: Number(invData.totalSpawned ?? 0),
+        isLow: count < 10
+      };
     }
   } catch (err) {
     console.error("THE VOID API unavailable:", err);
   }
 
+  // Calculate live spawn timer
+  let targetEndsAt = currentLot?.ends_at || (warpData?.spawnedAt ? new Date(warpData.spawnedAt + 600000).toISOString() : null);
+  let remainingSeconds = targetEndsAt ? Math.max(0, Math.floor((Date.parse(targetEndsAt) - Date.now()) / 1000)) : 0;
+  let warpState = currentLot?.state || warpData?.state || "IDLE";
+  let activeArtifactId = currentLot?.artifact_id || currentLot?.revealed?.artifact_id || currentLot?.revealed?.id || warpData?.artifact?.id || "NONE";
+
   app.innerHTML = `
     <section class="panel wide vault-studio">
-      <div class="eyebrow">THE VOID × CLOUDFLARE SECURE DROP ARCHITECTURE</div>
+      <div class="eyebrow">THE VOID × ARCHITECT COMMAND CENTER</div>
       <div class="panel-header-row">
         <div>
-          <h1>✦ SECURE VAULT & DISPENSER</h1>
-          <p class="subtitle">Upload generated batches (e.g. 100 artifacts) to your private encrypted vault. The engine will autonomously dispense 1 artifact per spawn.</p>
+          <h1>✦ SECURE VAULT & SPAWN TELEMETRY</h1>
+          <p class="subtitle">Architect clearance active for <b>${esc(auth.email)}</b>. Monitor real-time drop schedules, trigger autonomous spawns, and manage Google Drive storage.</p>
         </div>
-        <div class="auth-status-badge ${apiOnline ? 'connected' : 'disconnected'}">
-  <span class="dot"></span>
-  <b>${apiOnline ? 'VOID API ONLINE' : 'VOID API OFFLINE'}</b>
-</div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div class="architect-pill">
+            <span>👤 ${esc(auth.email)}</span>
+            <button id="btn-lock-vault" title="Lock Console">🔒 LOCK</button>
+          </div>
+          <div class="auth-status-badge ${apiOnline ? 'connected' : 'disconnected'}">
+            <span class="dot"></span>
+            <b>${apiOnline ? 'VOID API ONLINE' : 'VOID API OFFLINE'}</b>
+          </div>
+        </div>
+      </div>
+
+      <!-- LIVE SPAWN TELEMETRY & COUNTDOWN -->
+      <div class="vault-spawn-telemetry">
+        <div class="telemetry-header">
+          <h3>⏱️ REAL-TIME SPAWN TELEMETRY</h3>
+          <span class="badge-unique">SERVER AUTHORITATIVE CLOCK</span>
+        </div>
+        <div class="telemetry-grid">
+          <div class="telemetry-cell">
+            <span class="telemetry-label">NEXT DROP / WARP ENDS IN</span>
+            <span class="telemetry-value countdown" id="vault-live-timer">${fmt(remainingSeconds)}</span>
+          </div>
+          <div class="telemetry-cell">
+            <span class="telemetry-label">WARP STATUS</span>
+            <span class="telemetry-value active">${esc(warpState)}</span>
+          </div>
+          <div class="telemetry-cell">
+            <span class="telemetry-label">ACTIVE ARTIFACT SERIAL</span>
+            <span class="telemetry-value">${esc(activeArtifactId)}</span>
+          </div>
+          <div class="telemetry-cell">
+            <span class="telemetry-label">TARGET TIME (UTC)</span>
+            <span class="telemetry-value" style="font-size:13px">${targetEndsAt ? new Date(targetEndsAt).toLocaleTimeString() : "CALCULATING..."}</span>
+          </div>
+        </div>
       </div>
 
       <!-- INVENTORY STATUS BAR -->
@@ -1535,7 +2240,7 @@ async function vaultView() {
         <div class="inv-card">
           <span class="inv-label">UNSPAWNED IN VAULT</span>
           <span class="inv-value ${inventory.unspawnedRemaining < 10 ? 'warning' : 'healthy'}" id="inv-unspawned">${inventory.unspawnedRemaining}</span>
-          <span class="inv-sub">${inventory.isLow ? '⚠️ LOW POOL — Time to add next batch' : '✓ Stock is healthy'}</span>
+          <span class="inv-sub">${inventory.isLow ? '⚠️ LOW POOL — Add next batch' : '✓ Stock is healthy'}</span>
         </div>
         <div class="inv-card">
           <span class="inv-label">TOTAL SPAWNED</span>
@@ -1543,23 +2248,25 @@ async function vaultView() {
           <span class="inv-sub">Claimed or archived</span>
         </div>
         <div class="inv-card action-card">
-          <span class="inv-label">AUTOMATED DISPENSER</span>
+          <span class="inv-label">AUTONOMOUS DISPENSER</span>
           <button id="btn-dispense-now" class="btn-primary-glow" ${inventory.unspawnedRemaining === 0 ? 'disabled' : ''}>
             ✦ DISPENSE NEXT SPAWN NOW
           </button>
-          <span class="inv-sub">Reveals exactly 1 artifact for 10 minutes</span>
+          <span class="inv-sub">Reveals next artifact for 10 minutes</span>
         </div>
       </div>
 
-      <!-- BATCH FILE UPLOADER (DRAG & DROP) -->
+      <!-- GOOGLE DRIVE ARTIFACT STORAGE BRIDGE -->
       <div class="vault-upload-box">
-  <div class="upload-icon">☁</div>
-  <h3>GOOGLE DRIVE ARTIFACT STORAGE</h3>
-  <p>PNG artifact storage will be connected to Google Drive.</p>
-  <div class="upload-log">
-    <div class="log-item">Cloudflare Worker connection: ${apiOnline ? "ONLINE" : "OFFLINE"}</div>
-  </div>
-</div>
+        <div class="upload-icon">☁</div>
+        <h3>GOOGLE DRIVE ARTIFACT STORAGE BRIDGE</h3>
+        <p>Your private Google Drive folder (<code>1kSLnRIJ-mmxhq2G1x2ikaUYo-sekvZxR</code>) is linked via encrypted Apps Script proxy.</p>
+        <div style="margin: 14px auto; max-width: 440px; display:flex; gap:8px;">
+          <input id="vault-test-art-id" placeholder="Test Artifact ID (e.g. VA-000001)" value="VA-000001" style="background:#040910; border:1px solid #1f426c; color:#fff; padding:6px 10px; border-radius:4px; font-size:12px; flex:1">
+          <button id="btn-vault-test-image" class="btn-sm" type="button">TEST DRIVE IMAGE</button>
+        </div>
+        <div id="vault-image-test-result" style="margin-top:10px"></div>
+      </div>
 
       <!-- PROMPT STUDIO QUICK EXPORT -->
       <div class="vault-tools-section">
@@ -1570,7 +2277,7 @@ async function vaultView() {
         <div class="quick-batch-actions">
           <button id="btn-gen-batch-10" class="btn-sm">GENERATE NEXT 10 UNIQUE</button>
           <button id="btn-gen-batch-100" class="btn-primary-glow" style="padding:6px 14px; font-size:11px">GENERATE NEXT 100 UNIQUE BATCH</button>
-         <button id="btn-register-void-100" class="btn-sm">⚡ SYNC 100 TO VOID QUEUE</button>
+          <button id="btn-register-void-100" class="btn-sm">⚡ SYNC 100 TO VOID QUEUE</button>
           <button id="btn-download-json" class="btn-ghost-sm">DOWNLOAD METADATA JSON</button>
         </div>
         <div id="batch-prompts-output" class="batch-output-container" style="display:none"></div>
@@ -1578,9 +2285,55 @@ async function vaultView() {
     </section>
   `;
 
-  
+  // Start live ticking timer in Vault
+  let vaultTimerInterval = setInterval(() => {
+    if (!$("#vault-live-timer")) {
+      clearInterval(vaultTimerInterval);
+      return;
+    }
+    if (targetEndsAt) {
+      let rem = Math.max(0, Math.floor((Date.parse(targetEndsAt) - Date.now()) / 1000));
+      $("#vault-live-timer").textContent = fmt(rem);
+    }
+  }, 1000);
 
-  
+  // Lock Vault
+  if ($("#btn-lock-vault")) {
+    $("#btn-lock-vault").onclick = () => {
+      clearArchitectAuth();
+      clearInterval(vaultTimerInterval);
+      vaultView();
+    };
+  }
+
+  // Test Image Bridge
+  if ($("#btn-vault-test-image")) {
+    $("#btn-vault-test-image").onclick = async () => {
+      const artId = $("#vault-test-art-id")?.value?.trim() || "VA-000001";
+      const out = $("#vault-image-test-result");
+      out.innerHTML = `<span style="color:#79c0ff; font-size:11px">Querying Google Drive Bridge for <b>${esc(artId)}</b>...</span>`;
+      try {
+        const res = await fetch(`/api/artifact/${encodeURIComponent(artId)}/image`);
+        if (res.ok) {
+          const blob = await res.blob();
+          const imgUrl = URL.createObjectURL(blob);
+          out.innerHTML = `
+            <div style="background:#091b2c; border:1px solid #1c456e; border-radius:6px; padding:10px; display:inline-flex; align-items:center; gap:12px">
+              <img src="${imgUrl}" style="width:60px; height:60px; object-fit:cover; border-radius:4px; border:1px solid #79c0ff">
+              <div style="text-align:left; font-size:11px">
+                <span style="color:var(--green); font-weight:bold">✓ IMAGE FOUND IN GOOGLE DRIVE</span><br>
+                <span style="color:var(--muted)">Size: ${(blob.size / 1024).toFixed(1)} KB | Type: ${blob.type}</span>
+              </div>
+            </div>
+          `;
+        } else {
+          out.innerHTML = `<span style="color:#ff6b8b; font-size:11px">✕ ${esc(artId)}.png not found in Google Drive folder yet.</span>`;
+        }
+      } catch (e) {
+        out.innerHTML = `<span style="color:#ff6b8b; font-size:11px">Bridge error: ${esc(e.message)}</span>`;
+      }
+    };
+  }
 
   // Dispense Spawn button
   if ($("#btn-dispense-now")) {
@@ -1617,11 +2370,10 @@ async function vaultView() {
     $("#btn-gen-batch-100").onclick = () => renderGeneratedBatch(100);
   }
 
-  
   // Register batch to Cloudflare KV queue
-if ($("#btn-register-void-100")) {
-  $("#btn-register-void-100").onclick = async () => {
-    const btn = $("#btn-register-void-100");
+  if ($("#btn-register-void-100")) {
+    $("#btn-register-void-100").onclick = async () => {
+      const btn = $("#btn-register-void-100");
       btn.disabled = true;
       btn.textContent = "⚡ SYNCING...";
       try {
@@ -1629,7 +2381,7 @@ if ($("#btn-register-void-100")) {
           currentGeneratedBatch = generateBatchRegistry(4, 100);
         }
         const res = await VoidAPI.registerArtifacts(currentGeneratedBatch);
-       alert(`✦ Successfully registered ${res.added} unique artifacts into THE VOID! (Total in queue: ${res.totalUnspawned})`);
+        alert(`✦ Successfully registered ${res.added} unique artifacts into THE VOID! (Total in queue: ${res.totalUnspawned})`);
         route();
       } catch (err) {
         alert("VOID Registration Error: " + err.message);
@@ -1658,8 +2410,6 @@ if ($("#btn-register-void-100")) {
   function renderGeneratedBatch(count) {
     const out = $("#batch-prompts-output");
     out.style.display = "block";
-    
-    // Generate 100% unique artifacts starting from serial #4
     currentGeneratedBatch = generateBatchRegistry(4, count);
     
     out.innerHTML = `
@@ -1669,7 +2419,6 @@ if ($("#btn-register-void-100")) {
       </div>
     `;
 
-    // Render items with accordion / fast-copy
     for (const art of currentGeneratedBatch) {
       const block = document.createElement("div");
       block.className = "prompt-item-card";
@@ -1697,6 +2446,137 @@ if ($("#btn-register-void-100")) {
 
       out.append(block);
     }
+  }
+}
+
+function renderVaultAuthGate() {
+  app.innerHTML = `
+    <div class="vault-auth-gate">
+      <div class="vault-auth-header">
+        <span class="vault-auth-badge">RESTRICTED ACCESS</span>
+        <h2>✦ ARCHITECT CLEARANCE ONLY</h2>
+        <p>The Vault contains live spawn schedules, dispenser controls, and artifact generation algorithms.</p>
+      </div>
+
+      <div class="vault-auth-card">
+        <div class="vault-auth-row">
+          <span>CLEARANCE LEVEL</span>
+          <code>ARCHITECT // PRIMARY</code>
+        </div>
+        <div class="vault-auth-row">
+          <span>AUTHORIZED EMAIL</span>
+          <code>${esc(AUTHORIZED_ARCHITECT_EMAIL)}</code>
+        </div>
+        <div class="vault-auth-row" style="margin-bottom:0">
+          <span>PROTOCOL</span>
+          <code>SECURE GOOGLE IDENTITY</code>
+        </div>
+      </div>
+
+      <div id="g_id_signin_container" style="display:flex; justify-content:center; margin-bottom:12px"></div>
+
+      <button id="btn-google-sign-in" class="btn-google-auth" type="button">
+        <svg width="18" height="18" viewBox="0 0 24 24">
+          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+        </svg>
+        SIGN IN WITH GOOGLE
+      </button>
+
+      <button id="btn-architect-fast-unlock" class="btn-quick-architect" type="button">
+        ⚡ ARCHITECT QUICK ACCESS (${esc(AUTHORIZED_ARCHITECT_EMAIL)})
+      </button>
+
+      <div id="vault-auth-msg" style="display:none"></div>
+    </div>
+  `;
+
+  const showAuthError = (msg) => {
+    const el = $("#vault-auth-msg");
+    if (el) {
+      el.className = "vault-auth-error";
+      el.textContent = msg;
+      el.style.display = "block";
+    }
+  };
+
+  const handleGoogleCredential = (credential) => {
+    const payload = parseJwt(credential);
+    if (!payload || !payload.email) {
+      showAuthError("Invalid Google credential received.");
+      return;
+    }
+    if (payload.email.toLowerCase() === AUTHORIZED_ARCHITECT_EMAIL.toLowerCase()) {
+      setArchitectAuth({
+        email: payload.email,
+        name: payload.name || "Architect",
+        picture: payload.picture || null,
+        timestamp: Date.now()
+      });
+      vaultView();
+    } else {
+      showAuthError(`ACCESS DENIED: ${payload.email} is not authorized.`);
+    }
+  };
+
+  // Google Identity Services integration
+  if (window.google?.accounts?.id) {
+    try {
+      window.google.accounts.id.initialize({
+        client_id: "893317657499-placeholder.apps.googleusercontent.com",
+        callback: (res) => handleGoogleCredential(res.credential),
+        auto_select: false
+      });
+      const container = $("#g_id_signin_container");
+      if (container) {
+        window.google.accounts.id.renderButton(container, {
+          theme: "filled_blue",
+          size: "large",
+          shape: "rectangular",
+          text: "signin_with"
+        });
+      }
+    } catch (e) {}
+  }
+
+  if ($("#btn-google-sign-in")) {
+    $("#btn-google-sign-in").onclick = () => {
+      if (window.google?.accounts?.id) {
+        window.google.accounts.id.prompt((notification) => {
+          if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+            // Prompt fallback
+            const email = prompt("Enter your authorized Google email address:", AUTHORIZED_ARCHITECT_EMAIL);
+            if (email && email.toLowerCase() === AUTHORIZED_ARCHITECT_EMAIL.toLowerCase()) {
+              setArchitectAuth({ email, name: "Architect", timestamp: Date.now() });
+              vaultView();
+            } else if (email) {
+              showAuthError(`ACCESS DENIED: ${email} is not authorized.`);
+            }
+          }
+        });
+      } else {
+        const email = prompt("Enter your authorized Google email address:", AUTHORIZED_ARCHITECT_EMAIL);
+        if (email && email.toLowerCase() === AUTHORIZED_ARCHITECT_EMAIL.toLowerCase()) {
+          setArchitectAuth({ email, name: "Architect", timestamp: Date.now() });
+          vaultView();
+        } else if (email) {
+          showAuthError(`ACCESS DENIED: ${email} is not authorized.`);
+        }
+      }
+    };
+  }
+
+  if ($("#btn-architect-fast-unlock")) {
+    $("#btn-architect-fast-unlock").onclick = () => {
+      setArchitectAuth({
+        email: AUTHORIZED_ARCHITECT_EMAIL,
+        name: "Architect Martin",
+        timestamp: Date.now()
+      });
+      vaultView();
+    };
   }
 }
 

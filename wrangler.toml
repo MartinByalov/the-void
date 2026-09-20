@@ -1,0 +1,7 @@
+name = "crimson-smoke-3553"
+main = "worker.js"
+compatibility_date = "2024-09-01"
+
+kv_namespaces = [
+  { binding = "VOID_KV", id = "void_kv_namespace" }
+]
