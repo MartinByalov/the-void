@@ -7,6 +7,10 @@ const c = fs.readFileSync("web/public/void.css", "utf8");
 const s = fs.readFileSync("server/lots/service.mjs", "utf8");
 const a = fs.readFileSync("server/activity/index.mjs", "utf8");
 const http = fs.readFileSync("server/http/app.mjs", "utf8");
+const renderer = (start, end) => j.slice(j.indexOf(start), j.indexOf(end, j.indexOf(start)));
+const archiveRenderer = renderer("function drawArchive(a)", "\nasync function detail");
+const collectionRenderer = renderer("function drawLocalCards()", "\nfunction collectionDetail(a)");
+const collectionDetailRenderer = renderer("function collectionDetail(a)", "\nfunction contribute()");
 
 for (const x of [
   "LIVE FEED",
@@ -56,12 +60,15 @@ for (const x of [
   "NEW DISCOVERY",
   "addToCollection",
   "archive-detail-card",
-  "detail-flip-card",
+  "record-identity",
   "collectionDetail(x)"
 ]) assert.ok(j.includes(x), x);
 
 for (const x of ["WHAT IS THIS?", "GLOBAL ACTIVITY", "ACTIVE REGIONS", "people are present", "header-presence"])
   assert.ok(!j.includes(x), x);
+
+for (const x of ["VOID MEMORY", "VOID KNOWLEDGE GRAPH", "voidMemoryView", 'href="/memory"', 'p === "/memory"'])
+  assert.ok(!(h + j).includes(x), x);
 
 assert.ok(h.includes('>COLLECTION</a>'));
 assert.ok(h.includes('class="void-orb"'));
@@ -100,12 +107,13 @@ assert.ok(j.includes("class=card-class"));
 assert.ok(j.includes("class=card-weirdness"));
 assert.ok(j.includes("archive-back-id"));
 assert.ok(j.includes("recent-back-id"));
-assert.ok(j.includes("collection-back-id"));
+assert.ok(j.includes("LOCAL RECORD"));
 assert.ok(j.includes("rarity-name"));
 assert.ok(j.includes("const weirdnessTier"));
 assert.ok(j.includes("Math.min(100, Number(value) || 0)"));
 assert.ok(j.includes("const weirdnessRow"));
-assert.ok(j.includes('${rr("ANOMALY", String(a.anomaly || "UNKNOWN").replaceAll("_", " "))}${weirdnessRow(a.weirdness)}'));
+assert.ok(j.includes('rr("ANOMALY", String(a.anomaly || "MORPHOLOGICAL_SYNTHESIS").replaceAll("_", " "))'));
+assert.ok(j.includes("weirdnessRow(a.weirdness)"));
   assert.ok(j.includes("function renderFeed"));
   assert.ok(j.includes("data-feed-key"));
 assert.ok(j.includes("is-flipped"));
@@ -122,12 +130,10 @@ assert.ok(j.includes("https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png
 assert.ok(j.includes('alt="Buy Me a Coffee"'));
 assert.ok(j.includes("ARCHIVE SIGNAL ACQUIRED"));
 assert.ok(j.includes("ARCHIVED RECORD"));
-assert.ok(j.includes('>CLAIM</a>'));
+assert.ok(j.includes('>CLAIM RECORD</a>'));
 assert.ok(j.includes("collection-detail-actions"));
-assert.ok(j.includes('id=collection-detail-art'));
-assert.ok(j.includes('detailArt.querySelector(".card-front").append(cv(a))'));
-assert.ok(j.includes("AWAITING PARTNER OFFER"));
-assert.ok(j.includes('renderSideCard(trade.artifact, "YOUR LISTING"'));
+assert.ok(j.includes("VISUAL MATERIAL NOT YET GENERATED"));
+assert.ok(!collectionDetailRenderer.includes("append(cv("));
 assert.ok(j.includes("${esc(a.name)} FOUND ITS NEW OWNER"));
 assert.ok(j.includes("found_owner"));
 assert.ok(j.includes("JOIN THE WARP"));
@@ -149,15 +155,14 @@ assert.ok(j.includes('<h1>${collectionMode === "owned" ? "COLLECTION" : "EXCHANG
 assert.ok(j.includes('id="exchange-back"'));
 assert.ok(j.includes('id="archive-back"'));
 assert.ok(j.includes('id="collection-back"'));
-assert.ok(j.includes('"Your artifacts live with you, not with<br>THE VOID."'));
-assert.ok(j.includes("OFFERED BY SOUL"));
+assert.ok(j.includes("Your artifacts live with you, not with THE VOID."));
 assert.ok(j.includes('id=archive-sort aria-label="Sort artifacts alphabetically"'));
-assert.ok(j.includes('id=collection-sort aria-label="Sort artifacts alphabetically"'));
+assert.ok(j.includes('id="collection-sort" aria-label="Sort artifacts alphabetically"'));
 assert.ok(j.includes('option value="asc">NAME A–Z</option>'));
 assert.ok(j.includes('option value="desc">NAME Z–A</option>'));
 assert.ok(j.includes("a.name.localeCompare(b.name)"));
 assert.ok(j.includes('class="rarity-filter" id=r'));
-assert.ok(j.includes('class="rarity-filter" id=collection-r'));
+assert.ok(j.includes('class="rarity-filter" id="collection-r"'));
 assert.ok(j.includes("updateRarityFilter"));
 assert.ok(!j.includes('id="tab-collection"'));
 assert.ok(j.includes('sys(collectionMode === "owned" ? "COLLECTION // OWNED" : "RELIC EXCHANGE // TRADE MARKET")'));
@@ -263,13 +268,16 @@ assert.ok(c.includes(".reveal-panel .statbox span.rarity.LEGENDARY"));
 assert.ok(c.includes(".reveal-panel .statbox span.rarity.MYTHIC"));
 assert.ok(c.includes(".reveal-panel .statbox span.rarity.DIVINE"));
 assert.ok(c.includes(".reveal-panel .statbox b .rarity.LEGENDARY"));
-assert.ok(c.includes(".archive-detail-card .collection-detail-art"));
-assert.ok(c.includes(".archive-artifact-card .card-back"));
-assert.ok(c.includes(".archive-back-id,"));
-assert.ok(c.includes("top:10px;"));
-assert.ok(c.includes(".archive-artifact-card,\n.collection-card{\n  height:270px;"));
+assert.ok(c.includes(".archive-artifact-card.record-card,"));
+assert.ok(c.includes(".record-card .record-card-id,"));
+assert.ok(c.includes(".record-identity{"));
+assert.ok(!archiveRenderer.includes("append(cv("));
+assert.ok(!archiveRenderer.includes("cardart"));
+assert.ok(!archiveRenderer.includes("flip-card"));
+assert.ok(!collectionRenderer.includes("append(cv("));
+assert.ok(!collectionRenderer.includes("cardart"));
+assert.ok(!collectionRenderer.includes("flip-card"));
 assert.ok(c.includes(".drop-icon{display:block;margin-bottom:16px;font-size:38px;line-height:1}"));
-assert.ok(c.includes(".collection-card .card-back{position:absolute;inset:0;border:2px solid #a970ff"));
 assert.ok(c.includes(".rarity-name.RARE{color:#42d9ff"));
 assert.ok(c.includes(".artifact-stage.secret-stage{position:relative;overflow:hidden;cursor:default}"));
 assert.ok(c.includes(".collection-header-controls{"));
@@ -308,8 +316,8 @@ assert.ok(c.includes(".reveal-panel h1{"));
 assert.ok(c.includes(".collection-close{"));
 assert.ok(c.includes(".trade-mode-filter{"));
 assert.ok(c.includes(".trade-footer-actions{"));
-assert.ok(c.includes(".collection-detail .detail-flip-card"));
-assert.ok(c.includes("height:270px"));
+assert.ok(!collectionDetailRenderer.includes("collection-detail-art"));
+assert.ok(!collectionDetailRenderer.includes("detail-flip-card"));
 assert.ok(s.includes("LOT_DURATION_MS"));
 assert.ok(s.includes("REVEAL_DURATION_MS"));
 assert.ok(s.includes("country_counts:l.countries"));

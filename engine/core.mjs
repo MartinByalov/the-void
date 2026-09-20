@@ -7,6 +7,7 @@ import {identity} from "./identity/index.mjs";
 import {morphology} from "./grammars/morphology.mjs";
 import {composeTraits} from "./traits/composition.mjs";
 import {buildStory} from "./coherence/story.mjs";
+import {synthesizeGestalt} from "./vector/generator.mjs";
 export function rng(seed){let a=seed>>>0;return()=>{a+=0x6D2B79F5;let t=a;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296}}
 const pick=(r,a)=>a[Math.floor(r()*a.length)];
 export function generate(seed){
@@ -22,9 +23,12 @@ export function generate(seed){
  const morphologyPrimitives=morphology(object,{variant:def.variant,primitives:familyPrimitives});
  const composed=composeTraits(def.family,r,anomaly.id);
  const primitives=[...morphologyPrimitives,...composed.primitives],pixels=render24(primitives,palette);
+ const vectorModel=synthesizeGestalt(seed, { host: object, palette });
  return {protocol:"VOID-ARTIFACT/1",generator:"VOID ENGINE v1.5",seed:seed>>>0,
   artifact_id:"VA-"+(Math.imul(seed>>>0,2654435761)>>>0).toString(16).toUpperCase().padStart(8,"0"),
   object,classification,rarity,weirdness,anomaly:anomaly.id,palette,semantic_traits,
   name:identity(object,anomaly),lore:story.lore,condition:story.condition,stats:story.stats,
-  anomaly_domain:story.domain,traits:composed.selected,visual_anomaly:composed.visual_anomaly,pixels};
+  anomaly_domain:story.domain,traits:composed.selected,visual_anomaly:composed.visual_anomaly,
+  containment_protocol:story.containment_protocol,field_log:story.field_log,hazard_level:story.hazard_level,
+  origin_sector:story.origin_sector,spectral_frequency:story.spectral_frequency,pixels,svg:vectorModel.svg};
 }
