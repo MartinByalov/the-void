@@ -19,6 +19,7 @@ import { getAuthoritativeInstance } from "../evolution/certificate.mjs";
 import {
   getVaultStatus,
   getInventory,
+  resetVaultState,
   registerArtifacts,
   dispenseNextArtifact,
   getCurrentDrop,
@@ -93,6 +94,7 @@ const server = http.createServer(async (req, res) => {
     if (u.pathname === "/health" && req.method === "GET") return json(res, 200, { ok: true });
     if ((u.pathname === "/api" || u.pathname === "/api/status") && req.method === "GET") return json(res, 200, getVaultStatus());
     if (u.pathname === "/api/vault/inventory" && req.method === "GET") return json(res, 200, getInventory());
+    if (u.pathname === "/api/vault/reset" && req.method === "POST") return json(res, 200, resetVaultState());
     if (u.pathname === "/api/vault/register" && req.method === "POST") {
       let b = await body(req);
       return safe(() => json(res, 200, registerArtifacts(b.artifacts)), res);

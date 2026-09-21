@@ -5,5 +5,7 @@
   "spawnedAt": null,
   "claimedAt": null,
   "archivedAt": null,
-  "outcome": null
+  "claimedBy": null,
+  "claimAttempts": 0,
+  "secret": null
 }

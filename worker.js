@@ -7,847 +7,573 @@ const corsHeaders = {
 const REGISTRY_KEY = "VAULT_QUEUE_REGISTRY";
 const ACTIVE_SPAWN_KEY = "ACTIVE_SPAWN";
 const WARP_STATE_KEY = "WARP_STATE";
+const WARP_FEED_KEY = "WARP_LIVE_FEED";
+const ARCHIVE_KEY = "THE_ARCHIVE";
+const LOOT_WINDOW_MS = 60 * 1000;
+const MAX_FEED_EVENTS = 30;
 
-// ========================================================
-// WORKER
-// ========================================================
+const SPAWN_INTERVALS = {
+  COMMON: { min: 15 * 60 * 1000, max: 30 * 60 * 1000 },
+  UNCOMMON: { min: 25 * 60 * 1000, max: 45 * 60 * 1000 },
+  RARE: { min: 40 * 60 * 1000, max: 65 * 60 * 1000 },
+  EPIC: { min: 60 * 60 * 1000, max: 90 * 60 * 1000 },
+  LEGENDARY: { min: 90 * 60 * 1000, max: 120 * 60 * 1000 },
+  MYTHIC: { min: 120 * 60 * 1000, max: 180 * 60 * 1000 },
+  DIVINE: { min: 360 * 60 * 1000, max: 480 * 60 * 1000 },
+};
 
 export default {
   async fetch(request, env) {
-    if (request.method === "OPTIONS") {
-      return new Response(null, {
-        status: 204,
-        headers: corsHeaders,
-      });
-    }
-
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
     const url = new URL(request.url);
 
     try {
-      // --------------------------------------------------
-      // ROOT & STATUS
-      // --------------------------------------------------
-
-      if (
-        (url.pathname === "/" || url.pathname === "/api" || url.pathname === "/api/status") &&
-        request.method === "GET"
-      ) {
-        return json({
-          ok: true,
-          service: "THE VOID",
-          version: 3,
-          storage: "Cloudflare KV",
-          warpEngine: "UNKNOWN_CLAIM_WINDOW",
-          status: "ONLINE",
-          endpoints: [
-            "/api/status",
-            "/api/vault/inventory",
-            "/api/vault/register",
-            "/api/vault/dispense",
-            "/api/drop",
-            "/api/warp",
-            "/api/warp/claim",
-          ],
-        }, 200, 30);
+      if (["/", "/api", "/api/status"].includes(url.pathname) && request.method === "GET") {
+        return json({ ok: true, service: "THE VOID", version: 13, status: "ONLINE", warpEngine: "DURABLE_OBJECT_PUSH" }, 200, 30);
       }
 
-      // --------------------------------------------------
-      // VAULT INVENTORY
-      // --------------------------------------------------
-
-      if (
-        url.pathname === "/api/vault/inventory" &&
-        request.method === "GET"
-      ) {
-        const registry = await getRegistry(env);
-
-        return json({
-          success: true,
-          totalUnspawned: registry.queue.length,
-          totalSpawned: registry.spawnedHistory.length,
-          lastSerialIndex: registry.lastSerialIndex || 0,
-        }, 200, 30);
+      // Persistent push channel. No revealAt and no nextSpawnAt are sent to public clients.
+      if (url.pathname === "/warp-stream" && request.method === "GET") {
+        const hub = getWarpHub(env);
+        return hub.fetch(request);
       }
 
-      // --------------------------------------------------
-      // REGISTER ARTIFACT BATCH
-      // --------------------------------------------------
-
-      if (
-        url.pathname === "/api/vault/register" &&
-        request.method === "POST"
-      ) {
-        const body = await safeJson(request);
-        const artifacts = body.artifacts;
-
-        if (!Array.isArray(artifacts)) {
-          return json(
-            {
-              success: false,
-              error: "INVALID_ARTIFACT_LIST",
-            },
-            400
-          );
-        }
-
-        const registry = await getRegistry(env);
-
-        const existingIds = new Set([
-          ...registry.queue.map(a => a.id),
-          ...registry.spawnedHistory,
-        ]);
-
-        let added = 0;
-
-        for (const artifact of artifacts) {
-          if (!artifact?.id) continue;
-
-          if (!existingIds.has(artifact.id)) {
-            registry.queue.push(artifact);
-            existingIds.add(artifact.id);
-            added++;
-          }
-        }
-
-        await saveRegistry(env, registry);
-
-        return json({
-          success: true,
-          added,
-          totalUnspawned: registry.queue.length,
-        });
-      }
-
-      // --------------------------------------------------
-      // DISPENSE NEXT ARTIFACT
-      // --------------------------------------------------
-
-      if (
-        url.pathname === "/api/vault/dispense" &&
-        request.method === "POST"
-      ) {
-        const existingSpawn = await env.VOID_KV.get(
-          ACTIVE_SPAWN_KEY,
-          "json"
-        );
-
-        if (existingSpawn) {
-          const existingWarp = await getWarpState(env);
-
-          if (
-            existingWarp.artifact &&
-            existingWarp.artifact.id === existingSpawn.id &&
-            existingWarp.state !== "ARCHIVED"
-          ) {
-            return json(
-              {
-                success: false,
-                error: "ACTIVE_WARP_EXISTS",
-                message:
-                  `${existingSpawn.id} is still inside THE VOID.`,
-              },
-              409
-            );
-          }
-        }
-
-        const registry = await getRegistry(env);
-
-        if (!registry.queue.length) {
-          return json(
-            {
-              success: false,
-              error: "VAULT_EMPTY",
-              message: "Vault is empty.",
-            },
-            409
-          );
-        }
-
-        const artifact = registry.queue.shift();
-
-        registry.spawnedHistory.push(artifact.id);
-
-        await saveRegistry(env, registry);
-
-        const now = Date.now();
-
-        const spawn = {
-          ...artifact,
-          spawnedAt: now,
-        };
-
-        await env.VOID_KV.put(
-          ACTIVE_SPAWN_KEY,
-          JSON.stringify(spawn)
-        );
-
-        // Generate the hidden condition immediately.
-        const secret = createClaimCondition(artifact, now);
-
-        const previousWarp = await getWarpState(env);
-
-        const warp = {
-          warpId: Number(previousWarp.warpId || 0) + 1,
-
-          state: "ACTIVE",
-
-          artifact: spawn,
-
-          spawnedAt: now,
-
-          claimedAt: null,
-          archivedAt: null,
-
-          claimedBy: null,
-
-          claimAttempts: 0,
-
-          secret,
-        };
-
-        await saveWarpState(env, warp);
-
-        return json({
-          success: true,
-          spawn,
-          warp: publicWarp(warp),
-        });
-      }
-
-      // --------------------------------------------------
-      // CURRENT DROP
-      // --------------------------------------------------
-
-      if (
-        url.pathname === "/api/drop" &&
-        request.method === "GET"
-      ) {
-        let warp = await getWarpState(env);
-        warp = await checkAndAutoExpireWarp(env, warp);
-
-        const spawn = await env.VOID_KV.get(
-          ACTIVE_SPAWN_KEY,
-          "json"
-        );
-
-        if (!spawn) {
-          return json({
-            success: true,
-            active: false,
-            spawn: null,
-          }, 200, 15);
-        }
-
-        return json({
-          success: true,
-          active:
-            warp.state === "ACTIVE" ||
-            warp.state === "CLAIMED",
-          spawn,
-        }, 200, 15);
-      }
-
-      // --------------------------------------------------
-      // CURRENT WARP
-      // --------------------------------------------------
-
-      if (
-        url.pathname === "/api/warp" &&
-        request.method === "GET"
-      ) {
-        let warp = await getWarpState(env);
-        warp = await checkAndAutoExpireWarp(env, warp);
-
-        if (
-          !warp.artifact ||
-          warp.state === "IDLE"
-        ) {
-          return json({
-            success: true,
-            active: false,
-            warp: publicWarp(warp),
-          }, 200, 15);
-        }
-
-        return json({
-          success: true,
-          active: warp.state === "ACTIVE",
-          warp: publicWarp(warp),
-        }, 200, 15);
-      }
-
-      // --------------------------------------------------
-      // CLAIM ATTEMPT
-      // --------------------------------------------------
-
-      if (
-        url.pathname === "/api/warp/claim" &&
-        request.method === "POST"
-      ) {
+      // Initial public snapshot for a newly opened/reloaded page.
+      // It contains only what is already public NOW.
+      if (url.pathname === "/warp-state" && request.method === "GET") {
         const warp = await getWarpState(env);
+        return publicStateResponse(env, warp);
+      }
 
-        if (
-          !warp.artifact ||
-          warp.state === "IDLE"
-        ) {
-          return json(
-            {
-              success: false,
-              result: "NO_WARP",
-            },
-            409
-          );
+      // Canonical Vault Registry lives in Google Drive.
+      if (url.pathname === "/api/vault/registry" && request.method === "GET") {
+        const registry = await driveGet(env, "registry");
+        if (!registry?.ok) return json({ success: false, error: registry?.error || "REGISTRY_READ_FAILED" }, 502);
+        return json({ success: true, ...(registry.registry || { version: 1, nextSerial: 1, artifacts: [] }) });
+      }
+
+      // Public Archive contains ONLY Artifacts that actually surfaced.
+      if (url.pathname === "/api/archive" && request.method === "GET") {
+        const archive = await getArchive(env);
+        return json({ success: true, version: 1, count: archive.length, entries: archive }, 200, 5);
+      }
+
+      // Admin backup: authoritative KV Archive -> Google Drive /data/archive.json.
+      if (url.pathname === "/api/archive/sync" && request.method === "POST") {
+        const entries = await getArchive(env);
+        const result = await drivePost(env, { action: "writeArchive", entries });
+        if (!result?.ok) return json({ success: false, error: result?.error || "ARCHIVE_SYNC_FAILED" }, 502);
+        return json({ success: true, count: entries.length, updatedAt: result.updatedAt || Date.now() });
+      }
+
+      // CREATE ARTIFACT is the only operation that consumes the next serial.
+      // Draft generation in the browser never changes Drive or KV.
+      if (url.pathname === "/api/artifacts/create" && request.method === "POST") {
+        const body = await safeJson(request);
+        const artifact = body.artifact && typeof body.artifact === "object" ? body.artifact : null;
+        const imageBase64 = String(body.imageBase64 || "");
+        if (!artifact || !imageBase64) return json({ success: false, error: "MISSING_ARTIFACT_OR_IMAGE" }, 400);
+        if (String(body.mimeType || "image/png").toLowerCase() !== "image/png") return json({ success: false, error: "PNG_ONLY" }, 400);
+
+        const id = getArtifactId(artifact);
+        if (!id) return json({ success: false, error: "INVALID_ARTIFACT_ID" }, 400);
+
+        const driveResult = await drivePost(env, {
+          action: "createArtifact",
+          artifact: { ...artifact, id, artifact_id: id },
+          imageBase64,
+          mimeType: "image/png",
+          createdAt: Date.now(),
+        });
+        if (!driveResult?.ok) return json({ success: false, error: driveResult?.error || "DRIVE_CREATE_FAILED", ...driveResult }, 409);
+
+        const canonical = driveResult.artifact;
+        const registry = await getRegistry(env);
+        const warp = await getWarpState(env);
+        const existing = new Set([
+          ...registry.queue.map(getArtifactId),
+          ...registry.spawnedHistory,
+          getArtifactId(warp.artifact),
+          getArtifactId(warp.nextArtifact),
+        ].filter(Boolean));
+        if (!existing.has(id)) registry.queue.push(canonical);
+        registry.lastSerialIndex = Math.max(Number(registry.lastSerialIndex || 0), serialFromArtifactId(id));
+        await saveRegistry(env, registry);
+        return json({ success: true, artifact: canonical, nextSerial: driveResult.nextSerial, totalUnspawned: registry.queue.length + (warp.state === "WAITING" && warp.nextArtifact ? 1 : 0) });
+      }
+
+      if (url.pathname === "/api/vault/inventory" && request.method === "GET") {
+        const warp = await getWarpState(env);
+        const registry = await getRegistry(env);
+        const scheduled = warp.state === "WAITING" && warp.nextArtifact ? 1 : 0;
+        return json({
+          success: true,
+          totalUnspawned: registry.queue.length + scheduled,
+          queued: registry.queue.length,
+          scheduled,
+          totalSpawned: registry.spawnedHistory.length,
+          lastSerialIndex: Number(registry.lastSerialIndex || 0),
+          state: warp.state,
+          serverNow: Date.now(),
+          // Admin-only endpoint: the real schedule is allowed here.
+          nextSpawnAt: warp.state === "WAITING" ? normalizeTimestamp(warp.nextSpawnAt) : null,
+          expiresAt: warp.state === "ACTIVE" ? normalizeTimestamp(warp.expiresAt) : null,
+          activeArtifactId: warp.state === "ACTIVE" ? getArtifactId(warp.artifact) : null,
+        });
+      }
+
+      // Hard test reset. Canonical Drive Registry/PNGs are preserved.
+      // Runtime queue is rebuilt from Drive; WARP remains CLOSED.
+      if (url.pathname === "/api/vault/reset" && request.method === "POST") {
+        const driveRegistry = await driveGet(env, "registry");
+        const artifacts = Array.isArray(driveRegistry?.registry?.artifacts) ? driveRegistry.registry.artifacts : [];
+        const registry = {
+          queue: artifacts.map(a => ({ ...a })),
+          spawnedHistory: [],
+          lastSerialIndex: Math.max(0, ...artifacts.map(a => serialFromArtifactId(getArtifactId(a)))),
+        };
+        const warp = createEmptyWarpState();
+        await Promise.all([
+          saveRegistry(env, registry), saveWarpState(env, warp), saveWarpFeed(env, []), saveArchive(env, []), env.VOID_KV.delete(ACTIVE_SPAWN_KEY),
+        ]);
+        const hub = getWarpHub(env);
+        await hub.fetch(new Request("https://warp.internal/reset", { method: "POST" }));
+        return json({ success: true, reset: true, restoredFromRegistry: artifacts.length, serverNow: Date.now(), warp: adminWarp(warp) });
+      }
+
+      if (url.pathname === "/api/vault/scan-drive" && request.method === "POST") {
+        if (!env.GDRIVE_BRIDGE_URL || !env.GDRIVE_BRIDGE_KEY) {
+          return json({ success: false, error: "GDRIVE_BRIDGE_NOT_CONFIGURED" }, 503);
         }
-
-        if (warp.state === "CLAIMED") {
-          return json(
-            {
-              success: false,
-              result: "ALREADY_CLAIMED",
-              warp: publicWarp(warp),
-            },
-            409
-          );
-        }
-
-        if (warp.state === "ARCHIVED") {
-          return json(
-            {
-              success: false,
-              result: "GONE",
-              warp: publicWarp(warp),
-            },
-            409
-          );
-        }
-
-        const now = Date.now();
-
-        warp.claimAttempts =
-          Number(warp.claimAttempts || 0) + 1;
-
-        const evaluation =
-          evaluateClaimCondition(warp, now);
-
-        // ----------------------------------------------
-        // TOO EARLY / INVALID MOMENT
-        // ----------------------------------------------
-
-        if (evaluation === "NOT_YET") {
-          await saveWarpState(env, warp);
-
-          return json({
-            success: true,
-            result: "NOT_YET",
-          });
-        }
-
-        // ----------------------------------------------
-        // CLAIM WINDOW HAS PASSED
-        // ----------------------------------------------
-
-        if (evaluation === "GONE") {
-          warp.state = "ARCHIVED";
-          warp.archivedAt = now;
-
-          await saveWarpState(env, warp);
-
-          await env.VOID_KV.delete(
-            ACTIVE_SPAWN_KEY
-          );
-
-          return json({
-            success: true,
-            result: "GONE",
-            warp: publicWarp(warp),
-          });
-        }
-
-        // ----------------------------------------------
-        // SUCCESSFUL CLAIM
-        // ----------------------------------------------
-
-        if (evaluation === "CLAIM") {
-          const body = await safeJson(request);
-
-          const claimId =
-            normalizeClaimId(body?.claimId) ||
-            crypto.randomUUID();
-
-          warp.state = "CLAIMED";
-          warp.claimedAt = now;
-          warp.claimedBy = claimId;
-
-          await saveWarpState(env, warp);
-
-          return json({
-            success: true,
-            result: "CLAIMED",
-
-            artifact: warp.artifact,
-
-            claim: {
-              claimId,
-              claimedAt: now,
-            },
-
-            warp: publicWarp(warp),
-          });
-        }
-
-        return json(
-          {
-            success: false,
-            result: "UNKNOWN",
-          },
-          500
+        const response = await fetch(
+          `${env.GDRIVE_BRIDGE_URL}?action=list&key=${encodeURIComponent(env.GDRIVE_BRIDGE_KEY)}`,
+          { cf: { cacheTtl: 0 } }
         );
+        if (!response.ok) return json({ success: false, error: "GDRIVE_SCAN_FAILED", status: response.status }, 502);
+        const data = await response.json();
+        if (!data?.ok || !Array.isArray(data.images)) return json({ success: false, error: data?.error || "INVALID_GDRIVE_SCAN" }, 502);
+        const images = data.images.map(x => ({
+          artifactId: String(x.artifactId || "").trim(),
+          name: String(x.name || ""),
+          mimeType: String(x.mimeType || "image/png"),
+        })).filter(x => x.artifactId);
+        return json({ success: true, count: images.length, images, serverNow: Date.now() });
       }
 
-      // --------------------------------------------------
-      // ARTIFACT IMAGE PROXY (GOOGLE DRIVE BRIDGE)
-      // --------------------------------------------------
+      // Register only. Never starts WARP.
+      if (url.pathname === "/api/vault/register" && request.method === "POST") {
+        const body = await safeJson(request);
+        if (!Array.isArray(body.artifacts)) return json({ success: false, error: "INVALID_ARTIFACT_LIST" }, 400);
+        const registry = await getRegistry(env);
+        const warp = await getWarpState(env);
+        const existing = new Set([
+          ...registry.queue.map(getArtifactId),
+          ...registry.spawnedHistory,
+          getArtifactId(warp.artifact),
+          getArtifactId(warp.nextArtifact),
+        ].filter(Boolean));
+        let added = 0;
+        for (const artifact of body.artifacts) {
+          const id = getArtifactId(artifact);
+          if (!id || existing.has(id)) continue;
+          registry.queue.push({ ...artifact, id, artifact_id: artifact.artifact_id || id });
+          existing.add(id);
+          added++;
+        }
+        await saveRegistry(env, registry);
+        const scheduled = warp.state === "WAITING" && warp.nextArtifact ? 1 : 0;
+        return json({ success: true, added, totalUnspawned: registry.queue.length + scheduled, queued: registry.queue.length, scheduled, serverNow: Date.now(), warp: adminWarp(warp) });
+      }
 
-      if (
-        url.pathname.startsWith("/api/artifact/") &&
-        (url.pathname.endsWith("/image") || url.pathname.endsWith(".png")) &&
-        request.method === "GET"
-      ) {
-        const parts = url.pathname.split("/");
-        const rawId = parts[3]?.replace(/\.png$/, "") || "";
+      // ONLY manual IDLE -> WAITING control.
+      if (url.pathname === "/api/warp/start" && request.method === "POST") {
+        let warp = await getWarpState(env);
+        if (warp.state === "WAITING" || warp.state === "ACTIVE") {
+          return json({ success: true, alreadyRunning: true, serverNow: Date.now(), warp: adminWarp(warp) });
+        }
+        warp = await scheduleNextArtifactFromVault(env, warp, Date.now());
+        if (warp.state === "IDLE") {
+          return json({ success: false, error: "VAULT_EMPTY", message: "No Artifacts are registered from Drive.", serverNow: Date.now(), warp: adminWarp(warp) }, 409);
+        }
+        await pushWarpFeed(env, {
+          id: `warp-${warp.warpId}-start-${warp.nextSpawnAt}`,
+          type: "WARP_STARTED",
+          at: Date.now(),
+          title: "THE VOID IS STIRRING...",
+          text: "Something has changed beneath the surface.",
+        });
+        await armAndBroadcast(env, warp);
+        return json({ success: true, started: true, serverNow: Date.now(), warp: adminWarp(warp) });
+      }
+
+      // Test-only. Surfaces the already reserved Artifact immediately.
+      if (url.pathname === "/api/warp/force-drop" && request.method === "POST") {
+        const now = Date.now();
+        let warp = await getWarpState(env);
+        if (warp.state === "IDLE") return json({ success: false, error: "WARP_CLOSED", message: "Start WARP before forcing a drop.", serverNow: now, warp: adminWarp(warp) }, 409);
+        if (warp.state === "ACTIVE") return json({ success: false, error: "DROP_ALREADY_ACTIVE", message: "A drop is already active.", serverNow: now, warp: adminWarp(warp) }, 409);
+        if (warp.state !== "WAITING" || !warp.nextArtifact) return json({ success: false, error: "NO_SCHEDULED_ARTIFACT", serverNow: now, warp: adminWarp(warp) }, 409);
+        warp = await activateArtifact(env, warp, warp.nextArtifact, now);
+        await armAndBroadcast(env, warp);
+        return json({ success: true, forced: true, artifact: publicArtifact(warp.artifact), serverNow: now, warp: adminWarp(warp) });
+      }
+
+      if (url.pathname === "/api/warp" && request.method === "GET") {
+        const warp = await getWarpState(env);
+        return json({ success: true, active: warp.state === "ACTIVE" && !!warp.artifact, serverNow: Date.now(), warp: adminWarp(warp), feed: await getWarpFeed(env) });
+      }
+
+      if (url.pathname === "/api/drop" && request.method === "GET") {
+        const warp = await getWarpState(env);
+        return json({
+          success: true,
+          active: warp.state === "ACTIVE" && !!warp.artifact,
+          artifact: warp.state === "ACTIVE" ? publicArtifact(warp.artifact) : null,
+          state: warp.state,
+          serverNow: Date.now(),
+          loot: warp.state === "ACTIVE" ? { closesAt: normalizeTimestamp(warp.expiresAt) } : null,
+        });
+      }
+
+      // Multi-claim. Claim does not end the global 60-second Drop.
+      if (url.pathname === "/api/warp/claim" && request.method === "POST") {
+        const now = Date.now();
+        const warp = await getWarpState(env);
+        if (warp.state !== "ACTIVE" || !warp.artifact) return json({ success: false, result: "NO_ACTIVE_ARTIFACT", serverNow: now }, 409);
+        if (!warp.expiresAt || now >= Number(warp.expiresAt)) return json({ success: false, result: "GONE", serverNow: now }, 409);
+        return json({ success: true, result: "CLAIMED", artifact: publicArtifact(warp.artifact), serverNow: now, loot: { closesAt: normalizeTimestamp(warp.expiresAt) } });
+      }
+
+      if (url.pathname.startsWith("/api/artifact/") && (url.pathname.endsWith("/image") || url.pathname.endsWith(".png")) && request.method === "GET") {
+        const rawId = url.pathname.split("/")[3]?.replace(/\.png$/, "") || "";
         const artifactId = decodeURIComponent(rawId);
-
-        if (!artifactId) {
-          return new Response("Missing artifact ID", { status: 400, headers: corsHeaders });
-        }
-
+        if (!artifactId) return new Response("Missing artifact ID", { status: 400, headers: corsHeaders });
         const cacheKey = `IMG_CACHE_${artifactId}`;
-        const cachedBase64 = env.VOID_KV ? await env.VOID_KV.get(cacheKey) : null;
-        if (cachedBase64) {
-          const binary = Uint8Array.from(atob(cachedBase64), c => c.charCodeAt(0));
-          return new Response(binary, {
-            headers: {
-              ...corsHeaders,
-              "Content-Type": "image/png",
-              "Cache-Control": "public, max-age=86400, immutable",
-            },
-          });
-        }
-
-        const bridgeUrl = env.GDRIVE_BRIDGE_URL || "https://script.google.com/macros/s/AKfycbxU71GcSxKJSODAik_dfMXpBiKetK77A070POiFEkAPIracZMBodgVI3swztKKMXTKSgA/exec";
-        const bridgeKey = env.GDRIVE_BRIDGE_KEY || "Lglwos8XzCSJaQvTAMKuhRvXkNHAkpKQ";
-
-        let variants = [artifactId];
-        if (artifactId.includes("-")) variants.push(artifactId.replace(/-/g, "_"));
-        if (artifactId.includes("_")) variants.push(artifactId.replace(/_/g, "-"));
-
-        for (let targetId of variants) {
+        const cached = await env.VOID_KV.get(cacheKey);
+        if (cached) return new Response(base64ToUint8Array(cached), { headers: { ...corsHeaders, "Content-Type": "image/png", "Cache-Control": "public, max-age=86400, s-maxage=604800, immutable" } });
+        if (!env.GDRIVE_BRIDGE_URL || !env.GDRIVE_BRIDGE_KEY) return new Response("Google Drive bridge is not configured", { status: 503, headers: { ...corsHeaders, "Cache-Control": "no-store" } });
+        const variants = [artifactId, artifactId.replace(/-/g, "_"), artifactId.replace(/_/g, "-")];
+        for (const targetId of [...new Set(variants)]) {
           try {
-            const gdriveRes = await fetch(`${bridgeUrl}?id=${encodeURIComponent(targetId)}&key=${encodeURIComponent(bridgeKey)}`);
-            if (gdriveRes.ok) {
-              const data = await gdriveRes.json();
-              if (data && data.found && data.base64) {
-                if (env.VOID_KV) {
-                  await env.VOID_KV.put(cacheKey, data.base64, { expirationTtl: 604800 });
-                }
-                const binary = Uint8Array.from(atob(data.base64), c => c.charCodeAt(0));
-                return new Response(binary, {
-                  headers: {
-                    ...corsHeaders,
-                    "Content-Type": data.mimeType || "image/png",
-                    "Cache-Control": "public, max-age=86400, immutable",
-                  },
-                });
-              }
+            const response = await fetch(`${env.GDRIVE_BRIDGE_URL}?id=${encodeURIComponent(targetId)}&key=${encodeURIComponent(env.GDRIVE_BRIDGE_KEY)}`);
+            if (!response.ok) continue;
+            const data = await response.json();
+            if (data?.found && data?.base64) {
+              await env.VOID_KV.put(cacheKey, data.base64, { expirationTtl: 604800 });
+              return new Response(base64ToUint8Array(data.base64), { headers: { ...corsHeaders, "Content-Type": data.mimeType || "image/png", "Cache-Control": "public, max-age=86400, s-maxage=604800, immutable" } });
             }
-          } catch (err) {
-            // continue
-          }
+          } catch (error) { console.error("Google Drive bridge error:", error); }
         }
-
-        return new Response("Artifact image not found in Google Drive", { status: 404, headers: corsHeaders });
+        return new Response("Artifact image not found in Google Drive", { status: 404, headers: { ...corsHeaders, "Cache-Control": "no-store" } });
       }
 
-      // --------------------------------------------------
-      // UNKNOWN ENDPOINT
-      // --------------------------------------------------
-
-      return json(
-        {
-          ok: false,
-          error: "NOT_FOUND",
-        },
-        404
-      );
+      return json({ ok: false, error: "NOT_FOUND" }, 404);
     } catch (error) {
       console.error(error);
-
-      return json(
-        {
-          ok: false,
-          error: "INTERNAL_ERROR",
-          message:
-            error?.message ||
-            "Unknown Worker error",
-        },
-        500
-      );
+      return json({ ok: false, error: "INTERNAL_ERROR", message: error?.message || "Unknown Worker error" }, 500);
     }
   },
 };
 
-// ========================================================
-// SECRET CLAIM ENGINE
-// ========================================================
-
-function createClaimCondition(artifact, spawnedAt) {
-  /*
-    Calibrated for 15-30 spawns per 24 hours (1440 minutes):
-    - COMMON:    35 - 50 minutes
-    - UNCOMMON:  45 - 60 minutes
-    - RARE:      60 - 80 minutes
-    - EPIC:      75 - 95 minutes
-    - LEGENDARY: 95 - 120 minutes
-    - MYTHIC:    120 - 150 minutes
-
-    Weighted daily average: ~23 spawns per day (Range: 15-30).
-    Loot window once spawned: Exactly 60 seconds (1 minute).
-  */
-
-  const weirdness = clamp(
-    Number(artifact?.weirdness || 0),
-    0,
-    100
-  );
-
-  const rarity = String(artifact?.rarity || "COMMON").toUpperCase();
-  const rarityWeight = getRarityWeight(rarity);
-
-  // Random server-side entropy for jitter
-  const randomA = secureRandom();
-
-  let baseDelayMinutes = 35; // Default for COMMON
-  let varianceMinutes = 15;
-
-  if (rarity === "DIVINE" || rarity === "COSMIC") {
-    baseDelayMinutes = 360; // 6 hours base
-    varianceMinutes = 120;  // 6 - 8 hours (360 - 480 min)
-  } else if (rarity === "MYTHIC") {
-    baseDelayMinutes = 120;
-    varianceMinutes = 30; // 120 - 150 min (2 - 2.5 hours)
-  } else if (rarity === "LEGENDARY") {
-    baseDelayMinutes = 95;
-    varianceMinutes = 25; // 95 - 120 min (~1.5 - 2 hours)
-  } else if (rarity === "EPIC") {
-    baseDelayMinutes = 75;
-    varianceMinutes = 20; // 75 - 95 min
-  } else if (rarity === "RARE") {
-    baseDelayMinutes = 60;
-    varianceMinutes = 20; // 60 - 80 min
-  } else if (rarity === "UNCOMMON") {
-    baseDelayMinutes = 45;
-    varianceMinutes = 15; // 45 - 60 min
-  } else {
-    // COMMON
-    baseDelayMinutes = 35;
-    varianceMinutes = 15; // 35 - 50 min
+// One Durable Object owns the timer/alarm and all connected public sockets.
+// The browser never receives the secret nextSpawnAt.
+export class WarpHub {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
   }
 
-  // Jitter and weirdness influence within bounds
-  const jitterMs = Math.floor(randomA * varianceMinutes * 60 * 1000);
-  const anomalyJitterMs = Math.floor(weirdness * 1200); // 0 - 120 sec subtle variance
+  async fetch(request) {
+    const url = new URL(request.url);
 
-  const opensAt =
-    spawnedAt +
-    (baseDelayMinutes * 60 * 1000) +
-    jitterMs +
-    anomalyJitterMs;
+    if (url.pathname === "/warp-stream") {
+      if (request.headers.get("Upgrade") !== "websocket") return new Response("Expected WebSocket", { status: 426 });
+      const pair = new WebSocketPair();
+      const [client, server] = Object.values(pair);
+      this.state.acceptWebSocket(server);
+      const warp = await getWarpState(this.env);
+      server.send(JSON.stringify(await buildPublicState(this.env, warp, "SNAPSHOT")));
+      return new Response(null, { status: 101, webSocket: client });
+    }
 
-  // Exact 1 minute (60 seconds) LOOT window once materialized
-  const windowLength = 60 * 1000;
+    if (url.pathname === "/arm" && request.method === "POST") {
+      const warp = await getWarpState(this.env);
+      await this.armFor(warp);
+      await this.broadcast(warp, "STATE");
+      return new Response("OK");
+    }
 
-  const closesAt = opensAt + windowLength;
+    if (url.pathname === "/reset" && request.method === "POST") {
+      await this.state.storage.deleteAlarm();
+      await this.broadcast(createEmptyWarpState(), "RESET");
+      return new Response("OK");
+    }
 
+    return new Response("Not found", { status: 404 });
+  }
+
+  async alarm() {
+    const now = Date.now();
+    let warp = await getWarpState(this.env);
+
+    if (warp.state === "WAITING" && warp.nextArtifact && Number.isFinite(Number(warp.nextSpawnAt)) && now >= Number(warp.nextSpawnAt)) {
+      warp = await activateArtifact(this.env, warp, warp.nextArtifact, Number(warp.nextSpawnAt));
+    } else if (warp.state === "ACTIVE" && warp.artifact && Number.isFinite(Number(warp.expiresAt)) && now >= Number(warp.expiresAt)) {
+      warp = await finishCurrentWarpAndScheduleNext(this.env, warp, Number(warp.expiresAt));
+    }
+
+    await this.armFor(warp);
+    await this.broadcast(warp, "STATE");
+  }
+
+  async armFor(warp) {
+    if (warp.state === "WAITING" && Number.isFinite(Number(warp.nextSpawnAt))) {
+      await this.state.storage.setAlarm(Number(warp.nextSpawnAt));
+      return;
+    }
+    if (warp.state === "ACTIVE" && Number.isFinite(Number(warp.expiresAt))) {
+      await this.state.storage.setAlarm(Number(warp.expiresAt));
+      return;
+    }
+    await this.state.storage.deleteAlarm();
+  }
+
+  async broadcast(warp, event = "STATE") {
+    const message = JSON.stringify(await buildPublicState(this.env, warp, event));
+    for (const socket of this.state.getWebSockets()) {
+      try { socket.send(message); } catch { try { socket.close(1011, "send failed"); } catch {} }
+    }
+  }
+
+  async webSocketMessage(ws, message) {
+    if (String(message) === "ping") {
+      try { ws.send(JSON.stringify({ type: "PONG", serverNow: Date.now() })); } catch {}
+    }
+  }
+
+  async webSocketClose(ws, code, reason) {
+    try { ws.close(code, reason); } catch {}
+  }
+
+  async webSocketError(ws) {
+    try { ws.close(1011, "socket error"); } catch {}
+  }
+}
+
+function getWarpHub(env) {
+  const id = env.WARP_HUB.idFromName("global");
+  return env.WARP_HUB.get(id);
+}
+
+async function armAndBroadcast(env, warp) {
+  const hub = getWarpHub(env);
+  await hub.fetch(new Request("https://warp.internal/arm", { method: "POST" }));
+}
+
+async function publicStateResponse(env, warp) {
+  return new Response(JSON.stringify(await buildPublicState(env, warp, "SNAPSHOT")), {
+    status: 200,
+    headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
+  });
+}
+
+async function buildPublicState(env, warp, type = "STATE") {
+  const state = warp?.state || "IDLE";
   return {
-    version: 1,
-    family: "TEMPORAL_WINDOW",
-    opensAt,
-    closesAt,
-    createdAt: spawnedAt,
+    type,
+    revision: Number(warp?.warpId || 0),
+    state,
+    serverNow: Date.now(),
+    artifact: state === "ACTIVE" ? publicArtifact(warp.artifact) : null,
+    loot: state === "ACTIVE" ? { closesAt: normalizeTimestamp(warp.expiresAt) } : null,
+    feed: await getWarpFeed(env),
   };
 }
 
-function evaluateClaimCondition(warp, now) {
-  const secret = warp.secret;
-
-  if (!secret) {
-    return "NOT_YET";
+async function scheduleNextArtifactFromVault(env, warp, baseTime) {
+  const registry = await getRegistry(env);
+  if (!registry.queue.length) {
+    const idle = { ...createEmptyWarpState(), warpId: Number(warp?.warpId || 0), lastOutcome: warp?.lastOutcome || null };
+    await saveWarpState(env, idle);
+    return idle;
   }
-
-  switch (secret.family) {
-    case "TEMPORAL_WINDOW": {
-      if (now < secret.opensAt) {
-        return "NOT_YET";
-      }
-
-      if (now > secret.closesAt) {
-        return "GONE";
-      }
-
-      return "CLAIM";
-    }
-
-    default:
-      return "NOT_YET";
-  }
+  const nextArtifact = registry.queue.shift();
+  await saveRegistry(env, registry);
+  const schedule = createSpawnSchedule(nextArtifact, baseTime);
+  const waiting = {
+    warpId: Number(warp?.warpId || 0), state: "WAITING", artifact: null, spawnedAt: null, expiresAt: null,
+    nextArtifact, nextSpawnAt: schedule.nextSpawnAt, lastOutcome: warp?.lastOutcome || null,
+  };
+  await saveWarpState(env, waiting);
+  return waiting;
 }
 
-async function checkAndAutoExpireWarp(env, warp, now = Date.now()) {
-  if (
-    warp &&
-    warp.state === "ACTIVE" &&
-    warp.secret?.closesAt &&
-    now > warp.secret.closesAt
-  ) {
-    warp.state = "ARCHIVED";
-    warp.archivedAt = now;
-    warp.outcome = "LOST";
-    await saveWarpState(env, warp);
-    await env.VOID_KV.delete(ACTIVE_SPAWN_KEY);
+async function activateArtifact(env, previousWarp, artifact, spawnAt) {
+  const id = getArtifactId(artifact);
+  const activeArtifact = { ...artifact, id, artifact_id: artifact.artifact_id || id, spawnedAt: spawnAt };
+  const registry = await getRegistry(env);
+  if (id && !registry.spawnedHistory.includes(id)) {
+    registry.spawnedHistory.push(id);
+    await saveRegistry(env, registry);
   }
+  const warp = {
+    warpId: Number(previousWarp?.warpId || 0) + 1,
+    state: "ACTIVE",
+    artifact: activeArtifact,
+    spawnedAt: spawnAt,
+    expiresAt: spawnAt + LOOT_WINDOW_MS,
+    nextArtifact: null,
+    nextSpawnAt: null,
+    lastOutcome: previousWarp?.lastOutcome || null,
+  };
+  await env.VOID_KV.put(ACTIVE_SPAWN_KEY, JSON.stringify(activeArtifact));
+  await saveWarpState(env, warp);
+  await archiveSurfacedArtifact(env, activeArtifact, spawnAt, warp.warpId);
+  await pushWarpFeed(env, {
+    id: `warp-${warp.warpId}-drop`, type: "DROP_SURFACED", at: spawnAt,
+    title: "SOMETHING SURFACED.",
+    text: activeArtifact.name ? `${activeArtifact.name} · ${activeArtifact.rarity || "UNKNOWN"}` : "An Artifact emerged from THE VOID.",
+  });
+  await pushWarpFeed(env, {
+    id: `warp-${warp.warpId}-loot`, type: "LOOT_WINDOW", at: spawnAt,
+    title: "THE WINDOW IS OPEN.", text: "60 seconds to loot.",
+  });
   return warp;
 }
 
-// ========================================================
-// PUBLIC WARP
-// ========================================================
-
-function publicWarp(warp) {
-  if (!warp) {
-    return {
-      warpId: 0,
-      state: "IDLE",
-      artifact: null,
-      spawnedAt: null,
-      claimedAt: null,
-      archivedAt: null,
-      outcome: null,
-    };
+async function finishCurrentWarpAndScheduleNext(env, warp, expiredAt) {
+  const artifact = warp.artifact;
+  await pushWarpFeed(env, {
+    id: `warp-${warp.warpId}-sunk`, type: "DROP_EXPIRED", at: expiredAt,
+    title: "IT SANK BACK INTO THE VOID.", text: artifact?.name ? `${artifact.name} is gone.` : "The Artifact is gone.",
+  });
+  await env.VOID_KV.delete(ACTIVE_SPAWN_KEY);
+  const cleared = {
+    warpId: Number(warp.warpId || 0), state: "IDLE", artifact: null, spawnedAt: null, expiresAt: null,
+    nextArtifact: null, nextSpawnAt: null,
+    lastOutcome: artifact ? { artifactId: getArtifactId(artifact), outcome: "EXPIRED", surfacedAt: normalizeTimestamp(warp.spawnedAt), completedAt: expiredAt } : warp.lastOutcome || null,
+  };
+  await saveWarpState(env, cleared);
+  const next = await scheduleNextArtifactFromVault(env, cleared, expiredAt);
+  if (next.state === "WAITING") {
+    await pushWarpFeed(env, {
+      id: `warp-${warp.warpId}-next-${next.nextSpawnAt}`, type: "WARP_STARTED", at: expiredAt,
+      title: "THE VOID IS STIRRING...", text: "Something is moving beneath the surface.",
+    });
   }
+  return next;
+}
 
+function createSpawnSchedule(artifact, baseTime) {
+  const rarity = String(artifact?.rarity || "COMMON").toUpperCase();
+  const range = SPAWN_INTERVALS[rarity] || SPAWN_INTERVALS.COMMON;
+  const delayMs = randomInteger(range.min, range.max);
+  return { rarity, delayMs, nextSpawnAt: baseTime + delayMs };
+}
+
+function adminWarp(warp) {
+  const state = warp?.state || "IDLE";
   return {
-    warpId:
-      Number(warp.warpId || 0),
-
-    state:
-      warp.state || "IDLE",
-
-    artifact:
-      warp.artifact || null,
-
-    spawnedAt:
-      warp.spawnedAt ||
-      warp.artifact?.spawnedAt ||
-      null,
-
-    claimedAt:
-      warp.claimedAt || null,
-
-    archivedAt:
-      warp.archivedAt || null,
-
-    outcome:
-      warp.outcome ||
-      (warp.claimedAt ? "CLAIMED" : warp.state === "ARCHIVED" ? "LOST" : null),
+    warpId: Number(warp?.warpId || 0), state,
+    artifact: state === "ACTIVE" ? publicArtifact(warp.artifact) : null,
+    spawnedAt: state === "ACTIVE" ? normalizeTimestamp(warp.spawnedAt) : null,
+    expiresAt: state === "ACTIVE" ? normalizeTimestamp(warp.expiresAt) : null,
+    nextSpawnAt: state === "WAITING" ? normalizeTimestamp(warp.nextSpawnAt) : null,
+    lastOutcome: warp?.lastOutcome || null,
   };
 }
 
-// ========================================================
-// REGISTRY
-// ========================================================
+function publicArtifact(artifact) {
+  if (!artifact) return null;
+  const copy = structuredClone(artifact);
+  delete copy.spawnedAt;
+  delete copy.nextSpawnAt;
+  delete copy.revealAt;
+  delete copy.imageFileId;
+  return copy;
+}
+
+async function getArchive(env) {
+  const value = await env.VOID_KV.get(ARCHIVE_KEY, "json");
+  return Array.isArray(value) ? value : [];
+}
+async function saveArchive(env, entries) { return env.VOID_KV.put(ARCHIVE_KEY, JSON.stringify(entries)); }
+async function archiveSurfacedArtifact(env, artifact, surfacedAt, warpId) {
+  const id = getArtifactId(artifact);
+  if (!id) return;
+  const entries = await getArchive(env);
+  if (entries.some(x => getArtifactId(x) === id)) return;
+  entries.unshift({ ...publicArtifact(artifact), surfacedAt: normalizeTimestamp(surfacedAt), warpId: Number(warpId || 0) });
+  await saveArchive(env, entries);
+}
+
+async function driveGet(env, action, params = {}) {
+  if (!env.GDRIVE_BRIDGE_URL || !env.GDRIVE_BRIDGE_KEY) return { ok: false, error: "GDRIVE_BRIDGE_NOT_CONFIGURED" };
+  const url = new URL(env.GDRIVE_BRIDGE_URL);
+  url.searchParams.set("action", action);
+  url.searchParams.set("key", env.GDRIVE_BRIDGE_KEY);
+  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
+  const response = await fetch(url.toString(), { cf: { cacheTtl: 0 } });
+  if (!response.ok) return { ok: false, error: "GDRIVE_BRIDGE_HTTP_" + response.status };
+  return response.json();
+}
+async function drivePost(env, payload) {
+  if (!env.GDRIVE_BRIDGE_URL || !env.GDRIVE_BRIDGE_KEY) return { ok: false, error: "GDRIVE_BRIDGE_NOT_CONFIGURED" };
+  const response = await fetch(env.GDRIVE_BRIDGE_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...payload, key: env.GDRIVE_BRIDGE_KEY }),
+  });
+  if (!response.ok) return { ok: false, error: "GDRIVE_BRIDGE_HTTP_" + response.status };
+  return response.json();
+}
+function serialFromArtifactId(value) {
+  const m = String(value || "").match(/(\d+)$/);
+  return m ? Number(m[1]) : 0;
+}
+
+async function getWarpFeed(env) {
+  const feed = await env.VOID_KV.get(WARP_FEED_KEY, "json");
+  return Array.isArray(feed) ? feed : [];
+}
+async function saveWarpFeed(env, feed) { return env.VOID_KV.put(WARP_FEED_KEY, JSON.stringify(feed.slice(0, MAX_FEED_EVENTS))); }
+async function pushWarpFeed(env, event) {
+  const feed = await getWarpFeed(env);
+  if (feed.some(x => x.id === event.id)) return;
+  feed.unshift(event);
+  await saveWarpFeed(env, feed);
+}
 
 async function getRegistry(env) {
-  const registry = await env.VOID_KV.get(
-    REGISTRY_KEY,
-    "json"
-  );
-
-  if (!registry) {
-    return {
-      queue: [],
-      spawnedHistory: [],
-      lastSerialIndex: 0,
-    };
-  }
-
-  if (!Array.isArray(registry.queue)) {
-    registry.queue = [];
-  }
-
-  if (!Array.isArray(registry.spawnedHistory)) {
-    registry.spawnedHistory = [];
-  }
-
-  if (
-    !Number.isFinite(
-      Number(registry.lastSerialIndex)
-    )
-  ) {
-    registry.lastSerialIndex = 0;
-  }
-
-  return registry;
+  const r = await env.VOID_KV.get(REGISTRY_KEY, "json");
+  if (!r) return { queue: [], spawnedHistory: [], lastSerialIndex: 0 };
+  if (!Array.isArray(r.queue)) r.queue = [];
+  if (!Array.isArray(r.spawnedHistory)) r.spawnedHistory = [];
+  r.lastSerialIndex = Number(r.lastSerialIndex || 0);
+  return r;
 }
-
-async function saveRegistry(env, registry) {
-  await env.VOID_KV.put(
-    REGISTRY_KEY,
-    JSON.stringify(registry)
-  );
-}
-
-// ========================================================
-// WARP STATE
-// ========================================================
+function saveRegistry(env, registry) { return env.VOID_KV.put(REGISTRY_KEY, JSON.stringify(registry)); }
 
 async function getWarpState(env) {
-  const existing = await env.VOID_KV.get(
-    WARP_STATE_KEY,
-    "json"
-  );
-
-  if (existing) {
-    return existing;
-  }
-
-  return {
-    warpId: 0,
-    state: "IDLE",
-
-    artifact: null,
-
-    spawnedAt: null,
-
-    claimedAt: null,
-    archivedAt: null,
-
-    claimedBy: null,
-
-    claimAttempts: 0,
-
-    secret: null,
-  };
+  const w = await env.VOID_KV.get(WARP_STATE_KEY, "json");
+  if (!w) return createEmptyWarpState();
+  delete w.secret; delete w.claimAttempts; delete w.claimedBy; delete w.claimedAt; delete w.archivedAt; delete w.outcome; delete w.revealAt;
+  if (!("nextArtifact" in w)) w.nextArtifact = null;
+  if (!("nextSpawnAt" in w)) w.nextSpawnAt = null;
+  if (!("expiresAt" in w)) w.expiresAt = null;
+  if (!("lastOutcome" in w)) w.lastOutcome = null;
+  return { ...createEmptyWarpState(), ...w };
 }
-
-async function saveWarpState(env, warp) {
-  await env.VOID_KV.put(
-    WARP_STATE_KEY,
-    JSON.stringify(warp)
-  );
-}
-
-// ========================================================
-// RANDOM
-// ========================================================
-
-function secureRandom() {
-  const values = new Uint32Array(1);
-
-  crypto.getRandomValues(values);
-
-  return values[0] / 4294967296;
-}
-
-// ========================================================
-// ARTIFACT HELPERS
-// ========================================================
-
-function getRarityWeight(rarity) {
-  switch (
-    String(rarity || "").toUpperCase()
-  ) {
-    case "COMMON":
-      return 0;
-
-    case "UNCOMMON":
-      return 1;
-
-    case "RARE":
-      return 2;
-
-    case "EPIC":
-      return 3;
-
-    case "LEGENDARY":
-      return 4;
-
-    case "MYTHIC":
-      return 5;
-
-    case "DIVINE":
-      return 6;
-
-    default:
-      return 0;
-  }
-}
-
-function clamp(value, min, max) {
-  return Math.min(
-    Math.max(value, min),
-    max
-  );
-}
-
-function normalizeClaimId(value) {
-  if (!value) return null;
-
-  const id = String(value).trim();
-
-  if (
-    id.length < 8 ||
-    id.length > 128
-  ) {
-    return null;
-  }
-
-  if (
-    !/^[A-Za-z0-9_-]+$/.test(id)
-  ) {
-    return null;
-  }
-
-  return id;
-}
-
-// ========================================================
-// GENERAL HELPERS
-// ========================================================
-
-async function safeJson(request) {
-  try {
-    return await request.json();
-  } catch {
-    return {};
-  }
-}
-
+function createEmptyWarpState() { return { warpId: 0, state: "IDLE", artifact: null, spawnedAt: null, expiresAt: null, nextArtifact: null, nextSpawnAt: null, lastOutcome: null }; }
+function saveWarpState(env, warp) { return env.VOID_KV.put(WARP_STATE_KEY, JSON.stringify(warp)); }
+function getArtifactId(a) { const v = a?.id || a?.artifact_id || a?.artifactId; return v ? String(v).trim() : null; }
+function secureRandom() { const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] / 4294967296; }
+function randomInteger(min, max) { return Math.floor(secureRandom() * (max - min + 1)) + min; }
+function normalizeTimestamp(v) { const n = Number(v); return v === null || v === undefined || !Number.isFinite(n) ? null : n; }
+function base64ToUint8Array(base64) { const b = atob(base64), out = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) out[i] = b.charCodeAt(i); return out; }
+async function safeJson(request) { try { return await request.json(); } catch { return {}; } }
 function json(data, status = 200, cdnTtlSeconds = 0) {
-  const headers = {
-    ...corsHeaders,
-    "Content-Type": "application/json; charset=utf-8",
-  };
-
-  if (cdnTtlSeconds > 0) {
-    // Enable Cloudflare CDN edge caching
-    headers["Cache-Control"] = `public, max-age=5, s-maxage=${cdnTtlSeconds}, stale-while-revalidate=10`;
-  } else {
-    headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
-  }
-
-  return new Response(JSON.stringify(data), {
-    status,
-    headers,
-  });
+  const headers = { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" };
+  headers["Cache-Control"] = cdnTtlSeconds > 0 && status >= 200 && status < 300 ? `public, max-age=1, s-maxage=${cdnTtlSeconds}` : "no-store, no-cache, must-revalidate";
+  return new Response(JSON.stringify(data), { status, headers });
 }

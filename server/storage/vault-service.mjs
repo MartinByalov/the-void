@@ -71,6 +71,30 @@ export function getInventory() {
   };
 }
 
+export function resetVaultState() {
+  const reg = { queue: [], spawnedHistory: [], lastSerialIndex: 0 };
+  saveRegistry(reg);
+  setActiveSpawn(null);
+  const freshWarp = {
+    warpId: 0,
+    state: "IDLE",
+    artifact: null,
+    spawnedAt: null,
+    claimedAt: null,
+    archivedAt: null,
+    claimedBy: null,
+    claimAttempts: 0,
+    secret: null,
+  };
+  saveWarpState(freshWarp);
+  return {
+    success: true,
+    message: "Vault and spawn state reset completely.",
+    inventory: getInventory(),
+    warp: publicWarp(freshWarp),
+  };
+}
+
 export function registerArtifacts(artifacts) {
   if (!Array.isArray(artifacts)) {
     throw new Error("INVALID_ARTIFACT_LIST");
