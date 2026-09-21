@@ -52,6 +52,44 @@ export default {
         return json({ success: true, ...(registry.registry || { version: 1, nextSerial: 1, artifacts: [] }) });
       }
 
+      // Destructive admin maintenance: WARP must be closed before changing canonical Registry.
+      if (url.pathname === "/api/vault/registry/clear" && request.method === "POST") {
+        const warp = await getWarpState(env);
+        if (warp.state !== "IDLE") return json({ success: false, error: "WARP_MUST_BE_CLOSED" }, 409);
+
+        const result = await drivePost(env, { action: "clearRegistry" });
+        if (!result?.ok) return json({ success: false, error: result?.error || "REGISTRY_CLEAR_FAILED" }, 502);
+
+        const registry = { queue: [], spawnedHistory: [], lastSerialIndex: 0 };
+        await Promise.all([saveRegistry(env, registry), env.VOID_KV.delete(ACTIVE_SPAWN_KEY)]);
+        return json({ success: true, count: 0, nextSerial: 1, deletedImages: Number(result.deletedImages || 0) });
+      }
+
+      if (url.pathname === "/api/vault/registry/remove-last" && request.method === "POST") {
+        const warp = await getWarpState(env);
+        if (warp.state !== "IDLE") return json({ success: false, error: "WARP_MUST_BE_CLOSED" }, 409);
+
+        const driveRegistry = await driveGet(env, "registry");
+        if (!driveRegistry?.ok) return json({ success: false, error: driveRegistry?.error || "REGISTRY_READ_FAILED" }, 502);
+        const artifacts = Array.isArray(driveRegistry?.registry?.artifacts) ? driveRegistry.registry.artifacts : [];
+        if (!artifacts.length) return json({ success: false, error: "REGISTRY_EMPTY" }, 409);
+
+        const last = artifacts.reduce((best, item) => serialFromArtifactId(getArtifactId(item)) >= serialFromArtifactId(getArtifactId(best)) ? item : best, artifacts[0]);
+        const id = getArtifactId(last);
+        const runtimeRegistry = await getRegistry(env);
+        const archive = await getArchive(env);
+        const wasSurfaced = runtimeRegistry.spawnedHistory.includes(id) || archive.some(x => getArtifactId(x) === id);
+        if (wasSurfaced) return json({ success: false, error: "ARTIFACT_ALREADY_SURFACED", artifactId: id }, 409);
+
+        const result = await drivePost(env, { action: "removeLastArtifact", expectedArtifactId: id });
+        if (!result?.ok) return json({ success: false, error: result?.error || "REMOVE_LAST_FAILED", ...result }, 409);
+
+        runtimeRegistry.queue = runtimeRegistry.queue.filter(x => getArtifactId(x) !== id);
+        runtimeRegistry.lastSerialIndex = Math.max(0, Number(result.nextSerial || 1) - 1);
+        await saveRegistry(env, runtimeRegistry);
+        return json({ success: true, removed: result.removed || last, artifactId: id, nextSerial: Number(result.nextSerial || 1), totalUnspawned: runtimeRegistry.queue.length });
+      }
+
       // Public Archive contains ONLY Artifacts that actually surfaced.
       if (url.pathname === "/api/archive" && request.method === "GET") {
         const archive = await getArchive(env);
@@ -64,6 +102,14 @@ export default {
         const result = await drivePost(env, { action: "writeArchive", entries });
         if (!result?.ok) return json({ success: false, error: result?.error || "ARCHIVE_SYNC_FAILED" }, 502);
         return json({ success: true, count: entries.length, updatedAt: result.updatedAt || Date.now() });
+      }
+
+      // Destructive admin maintenance: clear authoritative KV Archive and Drive backup.
+      if (url.pathname === "/api/archive/clear" && request.method === "POST") {
+        await saveArchive(env, []);
+        const result = await drivePost(env, { action: "writeArchive", entries: [] });
+        if (!result?.ok) return json({ success: false, error: result?.error || "ARCHIVE_CLEAR_DRIVE_FAILED" }, 502);
+        return json({ success: true, count: 0, updatedAt: result.updatedAt || Date.now() });
       }
 
       // CREATE ARTIFACT is the only operation that consumes the next serial.

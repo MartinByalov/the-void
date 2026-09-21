@@ -23,6 +23,9 @@ export const VoidAPI = {
     return request("/api/artifacts/create", { method: "POST", body: JSON.stringify(payload) });
   },
   async syncArchive() { return request("/api/archive/sync", { method: "POST" }); },
+  async clearVaultRegistry() { return request("/api/vault/registry/clear", { method: "POST" }); },
+  async removeLastVaultArtifact() { return request("/api/vault/registry/remove-last", { method: "POST" }); },
+  async clearArchive() { return request("/api/archive/clear", { method: "POST" }); },
   async registerArtifacts(artifacts) {
     if (!Array.isArray(artifacts)) throw new Error("registerArtifacts expects an array");
     return request("/api/vault/register", { method: "POST", body: JSON.stringify({ artifacts }) });

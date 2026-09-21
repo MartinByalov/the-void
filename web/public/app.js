@@ -2210,17 +2210,29 @@ function contribute() { let lotId = current?.id; sys("❓ ONE CONTRIBUTION"); ap
       let unspawnedCount = 0;
       let spawnedCount = 0;
       let warpData = null;
+      let vaultRegistryData = null;
+      let archiveData = null;
+      let registryArtifactCount = 0;
+      let registryNextSerial = 1;
+      let archiveArtifactCount = 0;
       let nextSpawnTimeStr = "NO ACTIVE SPAWN";
       let nextSpawnSub = "Vault queue empty";
       let vaultNextSpawnTimestamp = null;
 
       try {
-        const [status, invRes, warpRes] = await Promise.all([
+        const [status, invRes, warpRes, registryRes, archiveRes] = await Promise.all([
           VoidAPI.status().catch(() => ({ ok: false })),
           VoidAPI.getInventory().catch(() => null),
           VoidAPI.getWarp().catch(() => null),
+          VoidAPI.getVaultRegistry().catch(() => null),
+          VoidAPI.getArchive().catch(() => null),
         ]);
         apiOnline = status?.ok === true;
+        vaultRegistryData = registryRes;
+        archiveData = archiveRes;
+        registryArtifactCount = Array.isArray(registryRes?.artifacts) ? registryRes.artifacts.length : 0;
+        registryNextSerial = Math.max(1, Number(registryRes?.nextSerial || 1));
+        archiveArtifactCount = Array.isArray(archiveRes?.entries) ? archiveRes.entries.length : Number(archiveRes?.count || 0);
 
         if (invRes) {
           unspawnedCount = Number(invRes.totalUnspawned ?? invRes.unspawnedRemaining ?? 0);
@@ -2361,6 +2373,48 @@ function contribute() { let lotId = current?.id; sys("❓ ONE CONTRIBUTION"); ap
               </div>
               <div class="upload-log" style="display:block; margin-top:10px">
                 <div class="log-item">CREATE is the only action that writes the PNG + canonical metadata and adds the Artifact to the Vault queue.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- REGISTRY MAINTENANCE -->
+          <div class="vault-tools-section" id="registry-maintenance">
+            <div class="tool-header">
+              <h3>REGISTRY MAINTENANCE</h3>
+              <p>Destructive administrator controls for the canonical Vault Registry and public Archive. Registry operations require WARP CLOSED.</p>
+            </div>
+
+            <div class="vault-inventory-grid" style="margin-top:14px">
+              <div class="inv-card">
+                <span class="inv-label">VAULT REGISTRY</span>
+                <span class="inv-value healthy">${registryArtifactCount}</span>
+                <span class="inv-sub">NEXT SERIAL: VA-${String(registryNextSerial).padStart(6, "0")}</span>
+              </div>
+              <div class="inv-card action-card">
+                <span class="inv-label">LAST ARTIFACT</span>
+                <button id="btn-remove-last-artifact" class="btn-danger-glow" ${registryArtifactCount === 0 || warpData?.warp?.state !== "IDLE" ? "disabled" : ""}>
+                  REMOVE LAST ARTIFACT
+                </button>
+                <span class="inv-sub">Removes the highest serial if it has never surfaced, deletes its PNG, and reuses that serial.</span>
+              </div>
+              <div class="inv-card action-card">
+                <span class="inv-label">ENTIRE VAULT REGISTRY</span>
+                <button id="btn-clear-vault-registry" class="btn-danger-glow" ${warpData?.warp?.state !== "IDLE" ? "disabled" : ""}>
+                  CLEAR VAULT REGISTRY
+                </button>
+                <span class="inv-sub">Deletes all canonical VA/VOID PNGs, empties vault-registry.json, and resets next serial to VA-000001.</span>
+              </div>
+              <div class="inv-card">
+                <span class="inv-label">PUBLIC ARCHIVE</span>
+                <span class="inv-value">${archiveArtifactCount}</span>
+                <span class="inv-sub">SURFACED ARTIFACT RECORDS</span>
+              </div>
+              <div class="inv-card action-card">
+                <span class="inv-label">ENTIRE ARCHIVE</span>
+                <button id="btn-clear-archive" class="btn-danger-glow" ${archiveArtifactCount === 0 ? "disabled" : ""}>
+                  CLEAR ARCHIVE
+                </button>
+                <span class="inv-sub">Clears Cloudflare THE_ARCHIVE and Google Drive data/archive.json.</span>
               </div>
             </div>
           </div>
@@ -2529,6 +2583,84 @@ function contribute() { let lotId = current?.id; sys("❓ ONE CONTRIBUTION"); ap
             alert("Forced Drop error: " + err.message);
             forceDropBtn.disabled = false;
             forceDropBtn.textContent = "⚡ FORCED DROP";
+          }
+        };
+      }
+
+      // Registry maintenance controls.
+      if ($("#btn-remove-last-artifact")) {
+        $("#btn-remove-last-artifact").onclick = async () => {
+          const artifacts = Array.isArray(vaultRegistryData?.artifacts) ? vaultRegistryData.artifacts : [];
+          const last = artifacts.reduce((best, item) => {
+            const serial = Number(String(item?.artifact_id || item?.id || "").match(/(\d+)$/)?.[1] || 0);
+            const bestSerial = Number(String(best?.artifact_id || best?.id || "").match(/(\d+)$/)?.[1] || 0);
+            return serial >= bestSerial ? item : best;
+          }, artifacts[0] || null);
+          const id = last?.artifact_id || last?.id || "the last Artifact";
+          if (!confirm(`Remove ${id} from the Vault Registry and delete its PNG? Its serial will become available again.`)) return;
+          const btn = $("#btn-remove-last-artifact");
+          btn.disabled = true;
+          btn.textContent = "REMOVING...";
+          try {
+            const result = await VoidAPI.removeLastVaultArtifact();
+            showToast(`✓ ${result.artifactId || id} REMOVED. NEXT SERIAL: VA-${String(result.nextSerial || 1).padStart(6, "0")}.`);
+            const drive = await VoidAPI.scanDrive().catch(() => null);
+            if (drive?.images) {
+              storedGdriveImages = drive.images.map(x => x.name || `${x.artifactId}.png`);
+              localStorage.setItem("void_gdrive_images", JSON.stringify(storedGdriveImages));
+            }
+            await vaultView();
+          } catch (err) {
+            showToast("Remove last Artifact error: " + err.message);
+            btn.disabled = false;
+            btn.textContent = "REMOVE LAST ARTIFACT";
+          }
+        };
+      }
+
+      if ($("#btn-clear-vault-registry")) {
+        $("#btn-clear-vault-registry").onclick = async () => {
+          const typed = prompt(`CLEAR ENTIRE VAULT REGISTRY?\n\nThis will remove ${registryArtifactCount} Artifact records, delete their canonical PNGs, empty the runtime queue, and reset the next serial to VA-000001.\n\nType CLEAR REGISTRY to continue:`);
+          if (typed !== "CLEAR REGISTRY") {
+            if (typed !== null) showToast("REGISTRY CLEAR CANCELLED — confirmation text did not match.");
+            return;
+          }
+          const btn = $("#btn-clear-vault-registry");
+          btn.disabled = true;
+          btn.textContent = "CLEARING...";
+          try {
+            const result = await VoidAPI.clearVaultRegistry();
+            storedGdriveImages = [];
+            localStorage.setItem("void_gdrive_images", "[]");
+            showToast(`✓ VAULT REGISTRY CLEARED. ${result.deletedImages || 0} PNGs REMOVED. NEXT SERIAL VA-000001.`);
+            await vaultView();
+          } catch (err) {
+            showToast("Clear Vault Registry error: " + err.message);
+            btn.disabled = false;
+            btn.textContent = "CLEAR VAULT REGISTRY";
+          }
+        };
+      }
+
+      if ($("#btn-clear-archive")) {
+        $("#btn-clear-archive").onclick = async () => {
+          const typed = prompt(`CLEAR ENTIRE PUBLIC ARCHIVE?\n\nThis will remove ${archiveArtifactCount} surfaced Artifact records from Cloudflare and data/archive.json.\n\nType CLEAR ARCHIVE to continue:`);
+          if (typed !== "CLEAR ARCHIVE") {
+            if (typed !== null) showToast("ARCHIVE CLEAR CANCELLED — confirmation text did not match.");
+            return;
+          }
+          const btn = $("#btn-clear-archive");
+          btn.disabled = true;
+          btn.textContent = "CLEARING...";
+          try {
+            await VoidAPI.clearArchive();
+            homeArchive = [];
+            showToast("✓ PUBLIC ARCHIVE CLEARED IN CLOUDFLARE AND GOOGLE DRIVE.");
+            await vaultView();
+          } catch (err) {
+            showToast("Clear Archive error: " + err.message);
+            btn.disabled = false;
+            btn.textContent = "CLEAR ARCHIVE";
           }
         };
       }
