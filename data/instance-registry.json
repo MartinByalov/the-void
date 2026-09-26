@@ -176,5 +176,209 @@
       "updatedAt": "2026-09-22T07:04:56.866Z",
       "signature": "mODHH4TMgzG5IpsZhMaxgPCgG5FswXx7xc+Py2Pmoni9lMhHOSOUGhj/3A7EIvkghQNSwUVEv4+qCI3bhh7uAQ=="
     }
+  },
+  "VX-287D3916": {
+    "latestRevision": 2,
+    "artifactId": "VA-287D3916",
+    "controller": "PUB_ECDSA_MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcD",
+    "evolution": {
+      "INSTINCT": 14,
+      "OBSERVATION": 0
+    },
+    "duels": 0,
+    "fusions": 2,
+    "provenance": [
+      {
+        "stat": "OBSERVATION",
+        "delta": 0,
+        "source": "FUSION",
+        "interaction": "CONDENSATION_OBSERVATION",
+        "interactionId": "MUT-1790406878605",
+        "revision": 2,
+        "timestamp": "2026-09-26T07:14:38.605Z"
+      },
+      {
+        "stat": "INSTINCT",
+        "delta": 7,
+        "source": "FUSION",
+        "interaction": "RESONANCE_INSTINCT",
+        "interactionId": "MUT-1790406878605",
+        "revision": 2,
+        "timestamp": "2026-09-26T07:14:38.605Z"
+      },
+      {
+        "stat": "OBSERVATION",
+        "delta": 0,
+        "source": "FUSION",
+        "interaction": "CONDENSATION_OBSERVATION",
+        "interactionId": "MUT-1790402261150",
+        "revision": 1,
+        "timestamp": "2026-09-26T05:57:41.150Z"
+      },
+      {
+        "stat": "INSTINCT",
+        "delta": 7,
+        "source": "FUSION",
+        "interaction": "RESONANCE_INSTINCT",
+        "interactionId": "MUT-1790402261150",
+        "revision": 1,
+        "timestamp": "2026-09-26T05:57:41.150Z"
+      }
+    ],
+    "certificate": {
+      "instanceId": "VX-287D3916",
+      "artifactId": "VA-287D3916",
+      "controller": "PUB_ECDSA_MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcD",
+      "revision": 2,
+      "evolution": {
+        "INSTINCT": 14,
+        "OBSERVATION": 0
+      },
+      "duels": 0,
+      "fusions": 2,
+      "provenance": [
+        {
+          "stat": "OBSERVATION",
+          "delta": 0,
+          "source": "FUSION",
+          "interaction": "CONDENSATION_OBSERVATION",
+          "interactionId": "MUT-1790406878605",
+          "revision": 2,
+          "timestamp": "2026-09-26T07:14:38.605Z"
+        },
+        {
+          "stat": "INSTINCT",
+          "delta": 7,
+          "source": "FUSION",
+          "interaction": "RESONANCE_INSTINCT",
+          "interactionId": "MUT-1790406878605",
+          "revision": 2,
+          "timestamp": "2026-09-26T07:14:38.605Z"
+        },
+        {
+          "stat": "OBSERVATION",
+          "delta": 0,
+          "source": "FUSION",
+          "interaction": "CONDENSATION_OBSERVATION",
+          "interactionId": "MUT-1790402261150",
+          "revision": 1,
+          "timestamp": "2026-09-26T05:57:41.150Z"
+        },
+        {
+          "stat": "INSTINCT",
+          "delta": 7,
+          "source": "FUSION",
+          "interaction": "RESONANCE_INSTINCT",
+          "interactionId": "MUT-1790402261150",
+          "revision": 1,
+          "timestamp": "2026-09-26T05:57:41.150Z"
+        }
+      ],
+      "rulesVersion": "void-evolution-v2.5",
+      "updatedAt": "2026-09-26T07:14:38.605Z",
+      "signature": "Ts9/l4D6J6biPVmbxPThku/gn2dvzwmFaJHRE5svGZ+JTWz+m1OxOX9VmOEBQTXZeeLxD82NwBXkH+GLQjLRCw=="
+    }
+  },
+  "VX-D42D58CF": {
+    "latestRevision": 2,
+    "artifactId": "VA-D42D58CF",
+    "controller": "PUB_ECDSA_MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcD",
+    "evolution": {
+      "INSTINCT": 14,
+      "OBSERVATION": 0
+    },
+    "duels": 0,
+    "fusions": 2,
+    "provenance": [
+      {
+        "stat": "OBSERVATION",
+        "delta": 0,
+        "source": "FUSION",
+        "interaction": "CONDENSATION_OBSERVATION",
+        "interactionId": "MUT-1790406878611",
+        "revision": 2,
+        "timestamp": "2026-09-26T07:14:38.611Z"
+      },
+      {
+        "stat": "INSTINCT",
+        "delta": 7,
+        "source": "FUSION",
+        "interaction": "RESONANCE_INSTINCT",
+        "interactionId": "MUT-1790406878611",
+        "revision": 2,
+        "timestamp": "2026-09-26T07:14:38.611Z"
+      },
+      {
+        "stat": "OBSERVATION",
+        "delta": 0,
+        "source": "FUSION",
+        "interaction": "CONDENSATION_OBSERVATION",
+        "interactionId": "MUT-1790402261158",
+        "revision": 1,
+        "timestamp": "2026-09-26T05:57:41.158Z"
+      },
+      {
+        "stat": "INSTINCT",
+        "delta": 7,
+        "source": "FUSION",
+        "interaction": "RESONANCE_INSTINCT",
+        "interactionId": "MUT-1790402261158",
+        "revision": 1,
+        "timestamp": "2026-09-26T05:57:41.158Z"
+      }
+    ],
+    "certificate": {
+      "instanceId": "VX-D42D58CF",
+      "artifactId": "VA-D42D58CF",
+      "controller": "PUB_ECDSA_MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcD",
+      "revision": 2,
+      "evolution": {
+        "INSTINCT": 14,
+        "OBSERVATION": 0
+      },
+      "duels": 0,
+      "fusions": 2,
+      "provenance": [
+        {
+          "stat": "OBSERVATION",
+          "delta": 0,
+          "source": "FUSION",
+          "interaction": "CONDENSATION_OBSERVATION",
+          "interactionId": "MUT-1790406878611",
+          "revision": 2,
+          "timestamp": "2026-09-26T07:14:38.611Z"
+        },
+        {
+          "stat": "INSTINCT",
+          "delta": 7,
+          "source": "FUSION",
+          "interaction": "RESONANCE_INSTINCT",
+          "interactionId": "MUT-1790406878611",
+          "revision": 2,
+          "timestamp": "2026-09-26T07:14:38.611Z"
+        },
+        {
+          "stat": "OBSERVATION",
+          "delta": 0,
+          "source": "FUSION",
+          "interaction": "CONDENSATION_OBSERVATION",
+          "interactionId": "MUT-1790402261158",
+          "revision": 1,
+          "timestamp": "2026-09-26T05:57:41.158Z"
+        },
+        {
+          "stat": "INSTINCT",
+          "delta": 7,
+          "source": "FUSION",
+          "interaction": "RESONANCE_INSTINCT",
+          "interactionId": "MUT-1790402261158",
+          "revision": 1,
+          "timestamp": "2026-09-26T05:57:41.158Z"
+        }
+      ],
+      "rulesVersion": "void-evolution-v2.5",
+      "updatedAt": "2026-09-26T07:14:38.611Z",
+      "signature": "sTLqvb+VzTF+H7Tqbj08NHRr5QNmbWmMeAznLU9FkKEMNzSAB8cyQPtWWDzHj0Ci7KS3q7hNgeaOx5uRFgD+Aw=="
+    }
   }
 }

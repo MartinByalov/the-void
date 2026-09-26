@@ -202,6 +202,8 @@
     function sys(t) { $("#sysmsg").textContent = t; }
 
     async function route() {
+      window.dispatchEvent(new Event("void:route"));
+      document.body.classList.remove("atlas-active");
       stopVoidSnake();
       clearInterval(timer);
       clearInterval(presenceTimer);
@@ -215,6 +217,7 @@
       if (location.pathname !== "/" && location.pathname !== "/void") refreshActivity();
       
       let p = location.pathname;
+      if (p === "/map") return worldMap();
       if (p === "/" || p === "/void") return voidHome();
       if (p === "/archive") return archive();
       if (p.startsWith("/archive/")) return detail(decodeURIComponent(p.split("/").pop()));
@@ -225,6 +228,64 @@
       if (p === "/vault") return vaultView();
       
       app.innerHTML = '<section class="panel wide empty">NOTHING IS HERE.</section>';
+    }
+
+    function worldMap() {
+      const planets = [
+        { id: "terra", name: "TERRA", kind: "HABITABLE WORLD", image: "/archive/VA_000001.png", color: "#58d6a2", description: "A living world. Its unexplored biomes conceal anomalous life and relics." },
+        { id: "elune", name: "ELUNE", kind: "NATURAL MOON", image: "/archive/VA_000002.png", color: "#b8a3ff", description: "A quiet moon in Terra's orbit. Strange signals echo beneath its pale surface." }
+      ];
+      const selected = new URLSearchParams(location.search).get("planet");
+      const planet = planets.find(item => item.id === selected);
+      sys(planet ? `EXPLORER // ${planet.name}` : "STAR CHART // THE VOID");
+
+      if (!planet) {
+        app.innerHTML = `<section class="shell void-map atlas-map" aria-label="World map of The Void">
+          <div class="atlas-canvas" id="atlas-canvas" aria-hidden="true"></div>
+          <div class="atlas-atmosphere" aria-hidden="true"></div>
+          <header class="atlas-brand"><span class="atlas-emblem">✦</span><h1>THE VOID</h1><span class="atlas-title-rule">✧</span></header>
+          <nav class="atlas-nav" aria-label="World navigation">
+            <a class="atlas-nav-item active" href="/map" data-link><span>✥</span> Worlds</a>
+            <a class="atlas-nav-item" href="/archive" data-link><span>⌖</span> Realms</a>
+            <a class="atlas-nav-item" href="/archive" data-link><span>✧</span> Chronicles</a>
+            <a class="atlas-nav-item" href="/archive" data-link><span>▱</span> Lore</a>
+          </nav>
+          <div class="atlas-kicker">CELESTIAL ATLAS <i></i> SECTOR 00</div>
+          <a class="atlas-world atlas-terra" href="/map?planet=terra" data-link aria-label="Explore Terra"><span class="atlas-world-label">TERRA</span><span class="atlas-label-gem">✦</span></a>
+          <a class="atlas-world atlas-elune" href="/map?planet=elune" data-link aria-label="Explore Elune"><span class="atlas-world-label">ELUNE</span><span class="atlas-label-gem">✦</span></a>
+          <div class="atlas-caption">TWO WORLDS CHARTED <span>·</span> A UNIVERSE UNFOLDING</div>
+        </section>`;
+        document.body.classList.add("atlas-active");
+        import("./world-map-scene.js").then(module => {
+          if (location.pathname === "/map" && !new URLSearchParams(location.search).get("planet")) module.mountWorldMap(document.querySelector("#atlas-canvas"));
+        }).catch(error => console.error("World map scene could not load:", error));
+        return;
+      }
+
+      document.body.classList.remove("atlas-active");
+      app.innerHTML = `<section class="shell void-map planet-survey" style="--world-color:${planet.color}"><a class="map-back" href="/map" data-link>← STAR CHART</a><div class="map-heading"><span>EXPLORER SURVEY // ${planet.kind}</span><h1>${planet.name}</h1><p>${planet.description}</p></div><div class="globe-stage"><div class="globe-halo"></div><div class="survey-globe"><img src="${planet.image}" alt="${planet.name} surface survey globe"><span class="globe-grid"></span><button class="discovery-pin pin-one" aria-label="Open discovery: The First Witness">✦</button><button class="discovery-pin pin-two" aria-label="Open discovery: The Quiet Signal">✦</button><button class="discovery-pin pin-three" aria-label="Open discovery: Unclassified trace">?</button></div><aside class="explorer-card"><small>ACTIVE EXPLORER</small><h2>THE WAYFINDER</h2><p>Surveying the unknown. Every discovery expands the archive.</p><div class="discovery-timer"><span>NEXT DISCOVERY</span><b id="world-countdown">24:00:00</b></div><span class="explorer-status">● PLANETARY SURVEY ACTIVE</span></aside></div><div class="map-footer"><span>KNOWN DISCOVERIES // 02</span><span>SELECT A SIGNAL ON THE GLOBE</span></div><div class="discovery-dialog" id="discovery-dialog" hidden><button class="discovery-close" aria-label="Close">×</button><small>EXPLORER FIELD RECORD // <span id="discovery-region"></span></small><h2 id="discovery-title"></h2><p id="discovery-lore"></p><div class="discovery-art"><img id="discovery-image" alt="Discovered artifact"></div><span>ARTIFACT RECORD // ARCHIVE</span></div></section>`;
+
+      const records = [
+        { title: "THE FIRST WITNESS", region: planet.id === "terra" ? "VERDANT BASIN" : "CRATER OF WHISPERS", lore: "The Explorer's first confirmed encounter. Its presence was recorded at the edge of the known survey, where the landscape gives way to an older and stranger world.", image: "/archive/VA_000003.png" },
+        { title: "THE QUIET SIGNAL", region: planet.id === "terra" ? "GLASSFEN MARSH" : "LUNAR DUSK REACH", lore: "A faint pulse led the Explorer to this relic. The field notes describe a low hum beneath the surface, repeating at intervals that do not match any known natural cycle.", image: "/archive/VA_000004.png" },
+        { title: "UNCLASSIFIED TRACE", region: "SURVEY PERIMETER", lore: "The survey has detected an anomaly here. Its origin remains unknown; the Explorer has marked the location for a future expedition.", image: "/archive/VA_000005.png" }
+      ];
+      app.querySelectorAll(".discovery-pin").forEach((pin, index) => pin.addEventListener("click", () => {
+        const record = records[index], dialog = $("#discovery-dialog");
+        $("#discovery-region").textContent = record.region;
+        $("#discovery-title").textContent = record.title;
+        $("#discovery-lore").textContent = record.lore;
+        $("#discovery-image").src = record.image;
+        dialog.hidden = false;
+      }));
+      $(".discovery-close").onclick = () => { $("#discovery-dialog").hidden = true; };
+      let remaining = 86400 - Math.floor((Date.now() % 86400000) / 1000);
+      const updateCountdown = () => {
+        const el = $("#world-countdown"); if (!el) return;
+        const h = String(Math.floor(remaining / 3600)).padStart(2, "0"), m = String(Math.floor(remaining % 3600 / 60)).padStart(2, "0"), s = String(remaining % 60).padStart(2, "0");
+        el.textContent = `${h}:${m}:${s}`; remaining = remaining <= 0 ? 86400 : remaining - 1;
+      };
+      updateCountdown(); presenceTimer = setInterval(updateCountdown, 1000);
     }
 
     let lastRenderedLotKey = null;

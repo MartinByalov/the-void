@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>The Void</title>
+
+    <link
+        rel="stylesheet"
+        href="./void-map.css"
+    >
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three":
+            "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+
+            "three/addons/":
+            "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+
+<body>
+
+<div id="app">
+
+    <!-- THREE.JS -->
+
+    <div id="world"></div>
+
+
+    <!-- atmospheric overlay -->
+
+    <div class="void-atmosphere"></div>
+
+
+    <!-- HEADER -->
+
+    <header id="header">
+
+        <div class="void-symbol">
+            ◆
+        </div>
+
+        <h1>
+            THE VOID
+        </h1>
+
+        <div class="title-line"></div>
+
+    </header>
+
+
+    <!-- NAVIGATION -->
+
+    <nav id="navigation">
+
+        <button class="nav-item active">
+            <span class="nav-icon">✦</span>
+            <span>Worlds</span>
+        </button>
+
+        <button class="nav-item">
+            <span class="nav-icon">✧</span>
+            <span>Realms</span>
+        </button>
+
+        <button class="nav-item">
+            <span class="nav-icon">◇</span>
+            <span>Chronicles</span>
+        </button>
+
+        <button class="nav-item">
+            <span class="nav-icon">▱</span>
+            <span>Lore</span>
+        </button>
+
+    </nav>
+
+
+    <!-- WORLD LABELS -->
+
+    <div
+        id="terra-label"
+        class="world-label"
+    >
+        <div class="label-line"></div>
+
+        <div class="label-box">
+            TERRA
+        </div>
+
+        <div class="label-diamond">
+            ◆
+        </div>
+    </div>
+
+
+    <div
+        id="elune-label"
+        class="world-label small"
+    >
+        <div class="label-line"></div>
+
+        <div class="label-box">
+            ELUNE
+        </div>
+
+        <div class="label-diamond">
+            ◆
+        </div>
+    </div>
+
+
+    <!-- HOVER INFO -->
+
+    <div id="hover-card">
+
+        <div class="hover-type">
+            WORLD
+        </div>
+
+        <h2 id="hover-name">
+            Terra
+        </h2>
+
+        <p id="hover-description">
+            The living world.
+        </p>
+
+        <div class="hover-action">
+            Click to explore
+        </div>
+
+    </div>
+
+
+    <!-- GLOBE MODE -->
+
+    <button id="back-button">
+        <span>‹</span>
+        THE VOID
+    </button>
+
+
+    <div id="terra-interface">
+
+        <div class="terra-type">
+            WORLD
+        </div>
+
+        <h2>
+            TERRA
+        </h2>
+
+        <div class="terra-subtitle">
+            THE LIVING WORLD
+        </div>
+
+    </div>
+
+
+    <!-- CONTROL HINT -->
+
+    <div id="control-hint">
+        DRAG TO ROTATE
+        <span>•</span>
+        SCROLL TO ZOOM
+    </div>
+
+
+    <!-- TRANSITION -->
+
+    <div id="transition-overlay"></div>
+
+</div>
+
+
+<script
+    type="module"
+    src="./main.js"
+></script>
+
+</body>
+</html>
