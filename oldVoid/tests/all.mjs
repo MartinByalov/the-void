@@ -1,1 +1,0 @@
-import "./generation/registry500.mjs";import "./generation/smoke.mjs";import "./generation/coherence.mjs";import "./quality.mjs";import "./verification/signature.mjs";import "./activity.mjs";import "./chat.mjs";import "./reveal.mjs";import "./product.mjs";console.log("\n✓ THE VOID v1 test suite complete");
