@@ -1,0 +1,292 @@
+{
+  "version": "1.0.0",
+  "totalFusionsObserved": 126,
+  "bridges": [
+    {
+      "source": "SCREEN",
+      "target": "EYE",
+      "relation": "SENSORY_SURFACE_EQUIVALENCE",
+      "strength": 0.94,
+      "examples": [
+        "CRT × FROG",
+        "CAMERA × OWL"
+      ]
+    },
+    {
+      "source": "ANTENNA",
+      "target": "SENSORY_APPENDAGE",
+      "relation": "SIGNAL_TRANSDUCTION",
+      "strength": 0.91,
+      "examples": [
+        "RADIO × MOTH",
+        "CRT × FROG"
+      ]
+    },
+    {
+      "source": "SIGNAL",
+      "target": "INSTINCT",
+      "relation": "BEHAVIORAL_RESONANCE",
+      "strength": 0.88,
+      "examples": [
+        "CRT × FROG",
+        "TELEGRAPH × BIRD"
+      ]
+    },
+    {
+      "source": "WET",
+      "target": "ELECTRICAL_ANOMALY",
+      "relation": "CONDUCTIVE_CATALYST",
+      "strength": 0.85,
+      "examples": [
+        "FROG × CRT"
+      ]
+    },
+    {
+      "source": "SPOUT",
+      "target": "MUZZLE",
+      "relation": "SIPHONIC_APERTURE",
+      "strength": 0.92,
+      "examples": [
+        "TEAPOT × MOUSE"
+      ]
+    },
+    {
+      "source": "HANDLE",
+      "target": "TAIL",
+      "relation": "VERTEBRATE_LEVERAGE",
+      "strength": 0.95,
+      "examples": [
+        "TEAPOT × MOUSE",
+        "MUG × OCTOPUS"
+      ]
+    },
+    {
+      "source": "STEAM",
+      "target": "RESPIRATION",
+      "relation": "THERMAL_METABOLISM",
+      "strength": 0.89,
+      "examples": [
+        "BOILER × FISH",
+        "KETTLE × TURTLE"
+      ]
+    },
+    {
+      "source": "DIAL",
+      "target": "HEARTBEAT",
+      "relation": "PULSE_CHRONOMETER",
+      "strength": 0.86,
+      "examples": [
+        "CLOCK × SNAIL",
+        "OSCILLOSCOPE × FROG"
+      ]
+    },
+    {
+      "source": "CARAPACE",
+      "target": "HOUSING",
+      "relation": "EXOSKELETAL_ARMOR",
+      "strength": 0.9,
+      "examples": [
+        "TYPEWRITER × CRAB"
+      ]
+    },
+    {
+      "source": "PEDAL",
+      "target": "WEB_FOOT",
+      "relation": "PROPULSION_STANCE",
+      "strength": 0.82,
+      "examples": [
+        "SEWING_MACHINE × DUCK"
+      ]
+    },
+    {
+      "source": "screen",
+      "target": "sensory_surface",
+      "relation": "OPTICAL_TRANSPOSITION",
+      "strength": 0.8,
+      "examples": [
+        "CEPHALOPOD × CRT"
+      ]
+    },
+    {
+      "source": "unified_gestalt",
+      "target": "shared_morphology",
+      "relation": "HOMOLOGOUS_TRAIT",
+      "strength": 0.8,
+      "examples": [
+        "VESSEL_OCTOPUS × VESSEL_RODENT"
+      ]
+    }
+  ],
+  "discoveredCombinations": [
+    {
+      "id": "FUSION-0006",
+      "concepts": [
+        "VESSEL_OCTOPUS",
+        "VESSEL_RODENT"
+      ],
+      "candidate": "VESSEL_OCTOPUS_VESSEL_RODENT_GESTALT",
+      "status": "ANOMALOUS_INSIGHT",
+      "coherence": 0.72,
+      "novelty": 0.55,
+      "observations": 1,
+      "bridges": [
+        "unified_gestalt->shared_morphology"
+      ],
+      "discoveredAt": "2026-09-22T07:04:56.857Z"
+    },
+    {
+      "id": "FUSION-0005",
+      "concepts": [
+        "CRT",
+        "CEPHALOPOD"
+      ],
+      "candidate": "CRT_CEPHALOPOD_GESTALT",
+      "status": "STABLE_FUSION",
+      "coherence": 0.88,
+      "novelty": 0.82,
+      "observations": 1,
+      "bridges": [
+        "screen->sensory_surface"
+      ],
+      "discoveredAt": "2026-09-20T00:00:21.390Z"
+    },
+    {
+      "id": "FUSION-0001",
+      "concepts": [
+        "CRT",
+        "FROG"
+      ],
+      "candidate": "BROADCAST_FROG",
+      "status": "ACCEPTED",
+      "coherence": 0.92,
+      "novelty": 0.86,
+      "observations": 42,
+      "bridges": [
+        "screen->sensory_surface",
+        "antenna->sensory_appendage",
+        "signal->behavior",
+        "wet->conductive_flux"
+      ],
+      "discoveredAt": "2026-09-18T10:14:00Z"
+    },
+    {
+      "id": "FUSION-0002",
+      "concepts": [
+        "TEAPOT",
+        "MOUSE"
+      ],
+      "candidate": "TEA_MOUSE",
+      "status": "ACCEPTED",
+      "coherence": 0.96,
+      "novelty": 0.79,
+      "observations": 38,
+      "bridges": [
+        "spout->muzzle",
+        "handle->tail",
+        "lid->cranial_plate"
+      ],
+      "discoveredAt": "2026-09-18T14:22:00Z"
+    },
+    {
+      "id": "FUSION-0003",
+      "concepts": [
+        "BOILER",
+        "FISH"
+      ],
+      "candidate": "CIRCULATING_FISH",
+      "status": "ACCEPTED",
+      "coherence": 0.89,
+      "novelty": 0.88,
+      "observations": 19,
+      "bridges": [
+        "pressure->depth_tolerance",
+        "steam->respiration",
+        "flue->dorsal_fin"
+      ],
+      "discoveredAt": "2026-09-19T02:05:00Z"
+    },
+    {
+      "id": "FUSION-0004",
+      "concepts": [
+        "CLOCK",
+        "SNAIL"
+      ],
+      "candidate": "CALLING_SNAIL",
+      "status": "ACCEPTED",
+      "coherence": 0.91,
+      "novelty": 0.84,
+      "observations": 25,
+      "bridges": [
+        "escapement->radula_rhythm",
+        "coiling_shell->clockwork_casing",
+        "pendulum->equilibrium"
+      ],
+      "discoveredAt": "2026-09-19T06:11:00Z"
+    }
+  ],
+  "generationCandidatePool": [
+    {
+      "name": "THE CRT CEPHALOPOD",
+      "parents": [
+        "CRT",
+        "CEPHALOPOD"
+      ],
+      "rarityBias": "RARE",
+      "weirdnessBias": 91
+    },
+    {
+      "name": "THE BROADCAST FROG",
+      "parents": [
+        "CRT",
+        "FROG"
+      ],
+      "rarityBias": "RARE",
+      "weirdnessBias": 78
+    },
+    {
+      "name": "THE TEA MOUSE",
+      "parents": [
+        "TEAPOT",
+        "MOUSE"
+      ],
+      "rarityBias": "UNCOMMON",
+      "weirdnessBias": 72
+    },
+    {
+      "name": "THE CIRCULATING FISH",
+      "parents": [
+        "BOILER",
+        "FISH"
+      ],
+      "rarityBias": "EPIC",
+      "weirdnessBias": 85
+    },
+    {
+      "name": "THE CALLING SNAIL",
+      "parents": [
+        "CLOCK",
+        "SNAIL"
+      ],
+      "rarityBias": "RARE",
+      "weirdnessBias": 79
+    },
+    {
+      "name": "THE POSTAL BIRD",
+      "parents": [
+        "TYPEWRITER",
+        "RAVEN"
+      ],
+      "rarityBias": "EPIC",
+      "weirdnessBias": 88
+    },
+    {
+      "name": "THE BREAKFAST TURTLE",
+      "parents": [
+        "TOASTER",
+        "TURTLE"
+      ],
+      "rarityBias": "UNCOMMON",
+      "weirdnessBias": 74
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "warpId": 0,
+  "state": "IDLE",
+  "artifact": null,
+  "spawnedAt": null,
+  "claimedAt": null,
+  "archivedAt": null,
+  "claimedBy": null,
+  "claimAttempts": 0,
+  "secret": null
+}

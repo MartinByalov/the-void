@@ -1,0 +1,180 @@
+{
+  "VX-3F4FF54B": {
+    "latestRevision": 1,
+    "artifactId": "VA-3F4FF54B",
+    "controller": "PUB_ECDSA_MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcD",
+    "evolution": {
+      "TEMPERATURE": 1
+    },
+    "duels": 1,
+    "fusions": 0,
+    "provenance": [
+      {
+        "stat": "TEMPERATURE",
+        "delta": 1,
+        "source": "DUEL",
+        "interaction": "ENDURED PARTIAL INTERFERENCE IN THE CRUSHING STEAM LAB",
+        "interactionId": "DUEL-MUCBK1ZI",
+        "revision": 1,
+        "timestamp": "2026-09-22T06:54:45.776Z"
+      }
+    ],
+    "certificate": {
+      "instanceId": "VX-3F4FF54B",
+      "artifactId": "VA-3F4FF54B",
+      "controller": "PUB_ECDSA_MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcD",
+      "revision": 1,
+      "evolution": {
+        "TEMPERATURE": 1
+      },
+      "duels": 1,
+      "fusions": 0,
+      "provenance": [
+        {
+          "stat": "TEMPERATURE",
+          "delta": 1,
+          "source": "DUEL",
+          "interaction": "ENDURED PARTIAL INTERFERENCE IN THE CRUSHING STEAM LAB",
+          "interactionId": "DUEL-MUCBK1ZI",
+          "revision": 1,
+          "timestamp": "2026-09-22T06:54:45.776Z"
+        }
+      ],
+      "rulesVersion": "void-evolution-v2.5",
+      "updatedAt": "2026-09-22T06:54:45.777Z",
+      "signature": "jk7VMbYsVgmW1XB4oxnfrqoJRnTlEbmw8blWOFgsQ7a4WZA/w3O3qawaH8rnkCJdvJEOt9rukceMIyLrepnaAQ=="
+    }
+  },
+  "VX-14333C63": {
+    "latestRevision": 1,
+    "artifactId": "VA-14333C63",
+    "controller": "PUB_ECDSA_MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcD",
+    "evolution": {
+      "INSTINCT": 7,
+      "OBSERVATION": 0
+    },
+    "duels": 0,
+    "fusions": 1,
+    "provenance": [
+      {
+        "stat": "OBSERVATION",
+        "delta": 0,
+        "source": "FUSION",
+        "interaction": "CONDENSATION_OBSERVATION",
+        "interactionId": "MUT-1790060696859",
+        "revision": 1,
+        "timestamp": "2026-09-22T07:04:56.859Z"
+      },
+      {
+        "stat": "INSTINCT",
+        "delta": 7,
+        "source": "FUSION",
+        "interaction": "RESONANCE_INSTINCT",
+        "interactionId": "MUT-1790060696859",
+        "revision": 1,
+        "timestamp": "2026-09-22T07:04:56.859Z"
+      }
+    ],
+    "certificate": {
+      "instanceId": "VX-14333C63",
+      "artifactId": "VA-14333C63",
+      "controller": "PUB_ECDSA_MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcD",
+      "revision": 1,
+      "evolution": {
+        "INSTINCT": 7,
+        "OBSERVATION": 0
+      },
+      "duels": 0,
+      "fusions": 1,
+      "provenance": [
+        {
+          "stat": "OBSERVATION",
+          "delta": 0,
+          "source": "FUSION",
+          "interaction": "CONDENSATION_OBSERVATION",
+          "interactionId": "MUT-1790060696859",
+          "revision": 1,
+          "timestamp": "2026-09-22T07:04:56.859Z"
+        },
+        {
+          "stat": "INSTINCT",
+          "delta": 7,
+          "source": "FUSION",
+          "interaction": "RESONANCE_INSTINCT",
+          "interactionId": "MUT-1790060696859",
+          "revision": 1,
+          "timestamp": "2026-09-22T07:04:56.859Z"
+        }
+      ],
+      "rulesVersion": "void-evolution-v2.5",
+      "updatedAt": "2026-09-22T07:04:56.859Z",
+      "signature": "/bueF5DgOYe6U2pXOGYoaISe1g4rhXeh7zXnpyGCEAg0vXqUuea7kmwqUhirZtj7J0M4UiBvFiRVIjCdfRusAQ=="
+    }
+  },
+  "VX-BFE35C1C": {
+    "latestRevision": 1,
+    "artifactId": "VA-BFE35C1C",
+    "controller": "PUB_ECDSA_MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcD",
+    "evolution": {
+      "INSTINCT": 7,
+      "OBSERVATION": 0
+    },
+    "duels": 0,
+    "fusions": 1,
+    "provenance": [
+      {
+        "stat": "OBSERVATION",
+        "delta": 0,
+        "source": "FUSION",
+        "interaction": "CONDENSATION_OBSERVATION",
+        "interactionId": "MUT-1790060696866",
+        "revision": 1,
+        "timestamp": "2026-09-22T07:04:56.866Z"
+      },
+      {
+        "stat": "INSTINCT",
+        "delta": 7,
+        "source": "FUSION",
+        "interaction": "RESONANCE_INSTINCT",
+        "interactionId": "MUT-1790060696866",
+        "revision": 1,
+        "timestamp": "2026-09-22T07:04:56.866Z"
+      }
+    ],
+    "certificate": {
+      "instanceId": "VX-BFE35C1C",
+      "artifactId": "VA-BFE35C1C",
+      "controller": "PUB_ECDSA_MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcD",
+      "revision": 1,
+      "evolution": {
+        "INSTINCT": 7,
+        "OBSERVATION": 0
+      },
+      "duels": 0,
+      "fusions": 1,
+      "provenance": [
+        {
+          "stat": "OBSERVATION",
+          "delta": 0,
+          "source": "FUSION",
+          "interaction": "CONDENSATION_OBSERVATION",
+          "interactionId": "MUT-1790060696866",
+          "revision": 1,
+          "timestamp": "2026-09-22T07:04:56.866Z"
+        },
+        {
+          "stat": "INSTINCT",
+          "delta": 7,
+          "source": "FUSION",
+          "interaction": "RESONANCE_INSTINCT",
+          "interactionId": "MUT-1790060696866",
+          "revision": 1,
+          "timestamp": "2026-09-22T07:04:56.866Z"
+        }
+      ],
+      "rulesVersion": "void-evolution-v2.5",
+      "updatedAt": "2026-09-22T07:04:56.866Z",
+      "signature": "mODHH4TMgzG5IpsZhMaxgPCgG5FswXx7xc+Py2Pmoni9lMhHOSOUGhj/3A7EIvkghQNSwUVEv4+qCI3bhh7uAQ=="
+    }
+  }
+}

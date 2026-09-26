@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: the-void
+    runtime: docker
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: LOT_DURATION_MS
+        value: 300000
+      - key: REVEAL_DURATION_MS
+        value: 45000
+    disk:
+      name: void-data
+      mountPath: /app/data
+      sizeGB: 1

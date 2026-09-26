@@ -1,0 +1,15 @@
+name = "crimson-smoke-3553"
+main = "worker.js"
+compatibility_date = "2026-09-20"
+
+[[kv_namespaces]]
+binding = "VOID_KV"
+id = "30f0c40d5084474fa51fec7c87db36c8"
+
+[[durable_objects.bindings]]
+name = "WARP_HUB"
+class_name = "WarpHub"
+
+[exports.WarpHub]
+type = "durable-object"
+storage = "sqlite"

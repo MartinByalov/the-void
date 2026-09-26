@@ -1,0 +1,40 @@
+import crypto from "node:crypto";import {read,write,update} from "../storage/store.mjs";import {generateAccepted} from "../quality/gate.mjs";import {generate} from "../../engine/core.mjs";import {createArtifact} from "../artifacts/create.mjs";import {keys} from "../crypto/keys.mjs";import {archive,archiveArtifact} from "../archive/index.mjs";import {selectClaim} from "../claims/model.mjs";
+if(process.env.LOT_DURATION_MS) process.env.LOT_DURATION_MS = String(parseInt(process.env.LOT_DURATION_MS, 10) || 300000);
+if(process.env.REVEAL_DURATION_MS) process.env.REVEAL_DURATION_MS = String(parseInt(process.env.REVEAL_DURATION_MS, 10) || 45000);
+const sha=s=>crypto.createHash("sha256").update(s).digest("hex");
+function newLot(){
+ const id=1000+Math.floor(Math.random()*9000),seed=crypto.randomBytes(4).readUInt32BE(),recent=archive().slice(0,50).map(x=>x.record);
+ const {artifact}=generateAccepted(seed,recent),secret=JSON.stringify({seed,artifact_id:artifact.artifact_id});
+ const baseDur=Number(process.env.LOT_DURATION_MS||300000);
+ const jitter=((seed % 1000)/1000 - 0.5)*0.35*baseDur;
+ const initialDur=Math.max(45000, Math.round(baseDur + jitter));
+ return {id,state:"OPEN",created_at:new Date().toISOString(),base_duration:initialDur,ends_at:new Date(Date.now()+Number(process.env.LOT_DURATION_MS||300000)).toISOString(),commitment:sha(secret),secret_seed:seed,artifact_id:artifact.artifact_id,silhouette_pixels:artifact.pixels.map(row=>row.map(Boolean)),participants:{},countries:{},winner_session:null,revealed:null};
+}
+function ensureSilhouette(l){if(!l?.silhouette_pixels&&Number.isInteger(l?.secret_seed))l.silhouette_pixels=generate(l.secret_seed).pixels.map(row=>row.map(Boolean));if(l?.next_lot)ensureSilhouette(l.next_lot);return l}
+function adjustLotDynamics(l){
+ if(!["OPEN","ACTIVE","UNSTABLE"].includes(l.state))return l;
+ const count=Object.keys(l.participants||{}).length;
+ const base=l.base_duration||Number(process.env.LOT_DURATION_MS||300000);
+ const minFloor=Math.min(base, 45000);
+ const accel=count>1?Math.min(base-minFloor, Math.log2(count)*22000):0;
+ const targetDuration=Math.max(minFloor, base-accel);
+ const computedEnd=Date.parse(l.created_at)+targetDuration;
+ const minEnd=Date.now()+15000;
+ l.ends_at=new Date(Math.max(minEnd, computedEnd)).toISOString();
+ return l;
+}
+export function getLot(session){let l=ensureSilhouette(read("current-lot",null));if(!l)l=write("current-lot",newLot());
+ if(["OPEN","ACTIVE","UNSTABLE"].includes(l.state)&&Date.now()>=Date.parse(l.ends_at))l=closeLot(l);
+ if(l.revealed&&Date.now()>=Date.parse(l.revealed_at||l.ends_at)+Number(process.env.REVEAL_DURATION_MS||45000))l=write("current-lot",l.next_lot||newLot());
+ if(l.revealed&&l.next_lot?.participants?.[session])return publicLot(l.next_lot,session);
+ return publicLot(l,session)}
+function joinLot(l,session,country){let p=l.participants[session],isNew=!p;p=p||{joined_at:new Date().toISOString(),last_seen:new Date().toISOString(),seconds:0,continuous:true,country};p.last_seen=new Date().toISOString();p.country=country;l.participants[session]=p;if(isNew)l.countries[country]=(l.countries[country]||0)+1;l.state="ACTIVE";adjustLotDynamics(l);return l}
+function heartbeatLot(l,session){let p=l.participants[session],now=Date.now(),last=Date.parse(p.last_seen),delta=Math.max(0,Math.min(30,(now-last)/1000));p.seconds+=delta;p.continuous=p.continuous&&(now-last<45000);p.last_seen=new Date(now).toISOString();return l}
+export function join(session,country="UNKNOWN"){let l=ensureSilhouette(read("current-lot",null))||newLot();if(l.revealed){l.next_lot=joinLot(l.next_lot||newLot(),session,country);write("current-lot",l);return publicLot(l.next_lot,session)}if(!["OPEN","ACTIVE","UNSTABLE"].includes(l.state))throw new Error("LOT_CLOSED");joinLot(l,session,country);write("current-lot",l);return publicLot(l,session)}
+export function heartbeat(session){let l=ensureSilhouette(read("current-lot",null));if(!l)throw new Error("NOT_JOINED");if(l.revealed){if(Date.now()>=Date.parse(l.revealed_at||l.ends_at)+Number(process.env.REVEAL_DURATION_MS||45000))return getLot(session);if(!l.next_lot?.participants?.[session])return getLot(session);heartbeatLot(l.next_lot,session);write("current-lot",l);return publicLot(l.next_lot,session)}if(!l.participants[session])throw new Error("NOT_JOINED");if(Date.now()>=Date.parse(l.ends_at))return getLot(session);heartbeatLot(l,session);write("current-lot",l);return publicLot(l,session)}
+export function closeCurrent(){let l=read("current-lot",null);if(!l)throw new Error("NO_LOT");return publicLot(closeLot(l))}
+ function closeLot(l){if(l.revealed)return l;const claims=Object.entries(l.participants).filter(([,p])=>Number(p.seconds||0)>0).map(([id,p])=>({id,minutes:p.seconds/60,continuous:p.continuous,active:true}));const winner=selectClaim(claims);if(!winner){const quiet=newLot();write("current-lot",quiet);return quiet}const {privateKey}=keys();const signed=createArtifact(l.secret_seed,{lot:l.id,participants:claims.length,countries:Object.keys(l.countries).length,country_counts:l.countries,combined_presence_minutes:Math.round(claims.reduce((s,x)=>s+x.minutes,0)),discovered_at:new Date().toISOString()},privateKey);l.state="REVEAL";l.revealed_at=new Date().toISOString();l.winner_session=winner?.id||null;l.revealed=signed;l.reveal_secret={seed:l.secret_seed};archiveArtifact({...signed,lot_id:l.id,winner_session:l.winner_session});l.next_lot=l.next_lot||newLot();write("current-lot",l);return l}
+export function nextLot(){return write("current-lot",newLot())}
+  function publicLot(l,session){const ps=Object.values(l.participants),mine=session?l.participants[session]:null,winner=!!session&&l.winner_session===session,next=l.next_lot;const revealDur=Number(process.env.REVEAL_DURATION_MS||45000);const revealEndsAt=l.revealed?new Date(Date.parse(l.revealed_at||l.ends_at)+revealDur).toISOString():null;const nextWarpSec=l.revealed?Math.max(0,Math.ceil((Date.parse(l.revealed_at||l.ends_at)+revealDur-Date.now())/1000)):null;return {id:l.id,state:l.state,ends_at:l.ends_at,commitment:l.commitment,participants:ps.length,countries:Object.keys(l.countries).length,combined_presence_seconds:Math.round(ps.reduce((s,p)=>s+p.seconds,0)),joined:!!mine,my_presence_seconds:Math.round(mine?.seconds||0),claim_label:label(mine?.seconds||0),revealed:l.revealed?.record||null,revealed_at:l.revealed_at||null,reveal_ends_at:revealEndsAt,next_warp_seconds:nextWarpSec,signature:winner?l.revealed?.signature||null:null,winner,found_owner:!!l.revealed&&!winner,surfaced_name:!winner?l.revealed?.record?.name||null:null,artifact_id:l.artifact_id,silhouette_pixels:l.silhouette_pixels||null,next_warp:next?{id:next.id,silhouette_pixels:next.silhouette_pixels||null,joined:!!(session&&next.participants?.[session])}:null}}
+function label(s){let m=s/60;return m>=75?"ENTANGLED":m>=40?"DEEP":m>=18?"ROOTED":m>=6?"NOTICED":m>0?"FAINT":"NONE"}
+export const rawLot=()=>read("current-lot",null);
